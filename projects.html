@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="eng">
+<head>
+    <meta charset="UTF-8">
+    <title>Projects</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+    <!--navigation bar-->
+    <nav class="navbar">
+        <ul class="nav-links">
+            <li><a href="index.html" >Home</a></li>
+            <li><a href="projects.html" class="active">Projects</a></li>
+        </ul>
+    </nav>
+
+    <section class="projects-section">
+        <h2> ML Projects</h2>
+
+        <div class="project-card" onclick="openModal()">
+            <h3>Diabetes Prediction</h3>
+            <p>Random Forest, Optuna</p>
+        </div>
+    </section>
+  <!--<h2>My ML Projects</h2>
+
+  <div class="project-card" onclick="openModal()">
+    <h3>Diabetes Prediction</h3>
+    <p>Random Forest, Optuna</p>
+  </div>
+</section>-->
+
+<!-- Modal -->
+<div id="projectModal" class="modal">
+  <div class="modal-content">
+    <span class="close" onclick="closeModal()">&times;</span>
+    <h3>Diabetes Prediction</h3>
+    <p><strong>Description:</strong> Built a machine learning model to predict diabetes using Random Forest and tuned it using Optuna.</p>
+    <p><strong>Tools used:</strong> Python, Scikit-learn, Optuna, Pandas</p>
+    <p><strong>Dataset:</strong> Diabetes Health Indicators Dataset (Kaggle)</p>
+    <p><strong>Accuracy:</strong> 89%</p>
+    <p><strong>Github:</strong> <a href="https://github.com/Kabitarb" target="_blank">View on GitHub</a></p>
+  </div>
+</div>
+
+
+<script>
+  function openModal() {
+    document.getElementById("projectModal").style.display = "block";
+  }
+
+  function closeModal() {
+    document.getElementById("projectModal").style.display = "none";
+  }
+
+  window.onclick = function(event) {
+    const modal = document.getElementById("projectModal");
+    if (event.target === modal) {
+      modal.style.display = "none";
+    }
+  }
+</script>
+
+</body>
+</html>
