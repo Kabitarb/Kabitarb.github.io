@@ -17,49 +17,67 @@
     <section class="projects-section">
         <h2> ML Projects</h2>
 
-        <div class="project-card" onclick="openModal()">
+        <div class="project-container">
+          <div class="project-card" onclick="openModal('diabetesModal')">
+            <!--<img src="photos/diabetes.jpg" alt="Diabetes Prediction Project">-->
             <h3>Diabetes Prediction</h3>
-            <p>Random Forest, Optuna</p>
-        </div>
+          </div>
+
+          <div class="project-card" onclick="openModal('honeyModel')">
+           <!--<img src="photos/honey.jpg" alt="Honey Production Prediction ">-->
+            <h3>Honey Production Prediction</h3>
+          </div>
+        
     </section>
-  <!--<h2>My ML Projects</h2>
-
-  <div class="project-card" onclick="openModal()">
-    <h3>Diabetes Prediction</h3>
-    <p>Random Forest, Optuna</p>
-  </div>
-</section>-->
-
+ 
 <!-- Modal -->
-<div id="projectModal" class="modal">
+<div id="diabetesModal" class="modal">
   <div class="modal-content">
     <span class="close" onclick="closeModal()">&times;</span>
     <h3>Diabetes Prediction</h3>
-    <p><strong>Description:</strong> Built a machine learning model to predict diabetes using Random Forest and tuned it using Optuna.</p>
-    <p><strong>Tools used:</strong> Python, Scikit-learn, Optuna, Pandas</p>
+    <p><strong>Description:</strong> Explored multiple classification models using lazy predict to compare performance metrics. Selected the
+    best performing model based on accuracy and further fine tuned it for prediction.</p>
+    <p><strong>Tools used:</strong> Python, Scikit-Learn, Lazy Predict, Pandas</p>
     <p><strong>Dataset:</strong> Diabetes Health Indicators Dataset (Kaggle)</p>
-    <p><strong>Accuracy:</strong> 89%</p>
-    <p><strong>Github:</strong> <a href="https://github.com/Kabitarb" target="_blank">View on GitHub</a></p>
+    <p><strong>Accuracy:</strong> 86%</p>
+    <p><strong>Github:</strong> <a href="https://github.com/Kabitarb/Diabetes-Prediction" target="_blank">View on GitHub</a></p>
+  </div>
+
+
+</div>
+
+<div id="honeyModel" class="modal">
+  <div class="modal-content">
+    <span class="close" onclick="closeModal()">&times;</span>
+    <h3>Honey Production Prediction</h3>
+    <p><strong>Description:</strong> Developed a regression model to analyse historical honey production data and forecast future trends.</p>
+    <p><strong>Tools used:</strong> Python, Pandas, NumPy, Matplotlib, Scikit-Learn, Flask, Joblib</p>
+    <p><strong>Dataset:</strong> Honey Production Dataset (Kaggle)</p>
+    <p><strong>Accuracy:</strong> 92%</p>
+    <p><strong>Github:</strong> <a href="https://github.com/Kabitarb/Honey-Prediction" target="_blank">View on GitHub</a></p>
   </div>
 </div>
 
-
 <script>
-  function openModal() {
-    document.getElementById("projectModal").style.display = "block";
+  function openModal(modalId) {
+    document.getElementById(modalId).style.display = "block";
   }
 
   function closeModal() {
-    document.getElementById("projectModal").style.display = "none";
+    document.querySelectorAll('.modal').forEach(modal => {
+      modal.style.display = "none";
+    });
   }
 
   window.onclick = function(event) {
-    const modal = document.getElementById("projectModal");
-    if (event.target === modal) {
-      modal.style.display = "none";
+    if (event.target.classList.contains('modal')) {
+      closeModal();
     }
   }
 </script>
+      
+
+
 
 </body>
 </html>

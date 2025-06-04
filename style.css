@@ -233,6 +233,17 @@ body {
 .projects-section {
   padding: 40px;
   text-align: center;
+  align-items: center;
+}
+
+.projects-container {   
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 30px;
+    max-width: 900px;
+    margin: 0 auto;
 }
 
 .project-card {
@@ -292,4 +303,23 @@ body {
 
 .modal-content, .project-card {
     transition: all 0.3s ease-in-out;
+}
+
+.project-card .img {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 5px;
+    width: 150px;
+}
+
+@media (max-width: 768px) {
+    .projects-container {
+        flex-direction: column;
+        align-items: center;
+    }
+    
+    .project-card {
+        width: 90%;
+        max-width: 350px;
+    }
 }
