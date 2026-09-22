@@ -1,6 +1,8 @@
-# Kabita — AI & Machine Learning portfolio
+# Kabita — Aspiring AI Engineer portfolio
 
 A responsive portfolio with original project illustrations, accessible case-study dialogs, project filters, a photo/resume editor, local persistence, and a portable website export. Built with TypeScript and Vite; no backend or runtime credentials are required.
+
+The second draft uses a diagonal light/black hero, circular portraits, framed section headings, and a monochrome interface with muted project illustrations. Geometric motion can be paused and respects the system's reduced-motion preference. Clicking a project card opens its details; the source-code link remains a separate action.
 
 ## Run locally
 
@@ -58,4 +60,6 @@ Alternatively, upload the ZIP exported from Portfolio Studio to any static host.
 
 Profile and education come from the original portfolio. Project summaries are based on the public Music-Genre-Classification, Diabetes_Prediction, and Honey-Prediction repositories. No employment history, performance metrics, live demos, or client endorsements have been invented. Project card graphics are conceptual illustrations, labelled as such in each case study.
 
-The portrait is the existing repository photo, converted to WebP. DM Sans and Instrument Serif are self-hosted; their OFL licenses are in `public/fonts`.
+The portrait is the existing repository photo, converted to WebP and cropped into a circle with CSS. The supplied example portrait was a shape reference, not a replacement for Kabita's photo. DM Sans is self-hosted; font licenses are in `public/fonts`.
+
+Design direction adapted from [Portfolio — Tomasz Gajda](https://www.figma.com/community/file/897605510384968096/portfolio-tomasz-gajda), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Changes include AI-focused graduate content, circular portraits, custom project illustrations and dialogs, geometric animation, and the local editor. Attribution is also included in the footer and exported website.
