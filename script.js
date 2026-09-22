@@ -193,23 +193,22 @@ navLinks.querySelectorAll("a").forEach((a) =>
   })
 );
 
-const sectionLinks = [...navLinks.querySelectorAll('a[href^="#"]:not(.btn)')];
-const sections = sectionLinks
-  .map((a) => document.querySelector(a.getAttribute("href")))
-  .filter(Boolean);
+const sectionLinks = [...navLinks.querySelectorAll('a[href^="#"]')];
+const sections = [...document.querySelectorAll("main section[id]")];
 
-const sectionObserver = new IntersectionObserver(
-  (entries) => {
-    entries.forEach((entry) => {
-      if (!entry.isIntersecting) return;
-      sectionLinks.forEach((a) =>
-        a.classList.toggle("is-active", a.getAttribute("href") === `#${entry.target.id}`)
-      );
-    });
-  },
-  { rootMargin: "-40% 0px -55% 0px" }
-);
-sections.forEach((s) => sectionObserver.observe(s));
+function updateActiveLink() {
+  const marker = window.scrollY + window.innerHeight * 0.4;
+  let current = null;
+  sections.forEach((s) => {
+    if (s.offsetTop <= marker) current = s.id;
+  });
+  sectionLinks.forEach((a) =>
+    a.classList.toggle("is-active", a.getAttribute("href") === `#${current}`)
+  );
+}
+updateActiveLink();
+window.addEventListener("scroll", updateActiveLink, { passive: true });
+window.addEventListener("resize", updateActiveLink);
 
 /* ------------------------------------------------------------------
    Scroll reveal

@@ -295,7 +295,8 @@ h1, h2, h3, h4 {
   transform-origin: left;
 }
 
-.nav-links .btn--pill:hover {
+.nav-links .btn--pill:hover,
+.nav-links .btn--pill.is-active {
   background: var(--white);
   color: var(--black);
   border-color: var(--white);
