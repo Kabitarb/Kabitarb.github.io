@@ -1,89 +1,266 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Portfolio</title>
-    <link rel="stylesheet" href="style.css" />
-    
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kabita Rajbanshi | AI Engineer</title>
+  <meta name="description" content="Portfolio of Kabita Rajbanshi, an aspiring AI Engineer specialising in machine learning and data analysis.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
 </head>
 
-
 <body>
-    <!--navigation bar-->
-    <nav class="navbar">
-        <ul class="nav-links">
-            <li><a href="index.html" class="active">Home</a></li>
-            <li><a href="projects.html">Projects</a></li>
-        </ul>
+  <!-- Animated geometric background -->
+  <div class="bg-shapes" aria-hidden="true">
+    <span class="shape shape--circle s1"></span>
+    <span class="shape shape--square s2"></span>
+    <span class="shape shape--triangle s3"></span>
+    <span class="shape shape--ring s4"></span>
+    <span class="shape shape--square s5"></span>
+    <span class="shape shape--circle s6"></span>
+    <span class="shape shape--triangle s7"></span>
+    <span class="shape shape--ring s8"></span>
+    <span class="shape shape--cross s9"></span>
+    <span class="shape shape--cross s10"></span>
+  </div>
+
+  <!-- Navigation -->
+  <header class="site-header" id="top">
+    <nav class="navbar container">
+      <a href="#top" class="logo" aria-label="Kabita Rajbanshi home">
+        <svg viewBox="0 0 48 48" width="40" height="40" aria-hidden="true">
+          <path d="M8 6h6v36H8zM14 24 34 6h8L22 24l20 18h-8z" fill="currentColor"/>
+        </svg>
+      </a>
+      <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <ul class="nav-links">
+        <li><a href="#about">About me</a></li>
+        <li><a href="#skills">Skills</a></li>
+        <li><a href="#projects">Projects</a></li>
+        <li><a href="#contact" class="btn btn--pill">Contact me</a></li>
+      </ul>
     </nav>
+  </header>
 
-    <main class="main-container">
-    <!-- Profile Photo -->
-    <div class="profile_photo">
-        <img src="photos/gradwcertificate-1.jpg" alt="Profile Photo">
-    </div>
-    
-    <!-- Content Box -->
-    <div class="content-box">
-        <div class="intro">
-            <h1>Hi, I am <span class="highlight">Kabita Rajbanshi</span></h1>
-            <h2>Data Analyst</h2>
-
-            <div class="contact_info">               
-                <div class="email-line">
-                    <img src="icons/gmail.png" alt="gmail icon"/>
-                    <p>kabitarb99@gmail.com</p> 
-                </div>
-                
-                <div class="phone">
-                    <img src="icons/address.png" alt="address icon"/>
-                    <p>971566546926</p>                
-                </div>
-            </div>
-
-            <div class="intro-text">
-                <p>
-                    I am a recent BSc (Hons) Computer Systems Engineering graduate from ISMT College,
-                    affiliated with the University of Sunderland. I've been honing my skills in Python
-                    and data analysis through hands-on projects. I'm currently seeking entry-level opportunities
-                    where I can contribute, learn, and grow alongside like-minded professionals.
-                </p>
-            </div>
-
-            <div class="icons">   
-                <a href="resume.pdf" target="_blank"><img src="icons/doc.png" alt="document icon"/></a>
-                <a href="https://github.com/Kabitarb" target="_blank"><img src="icons/github.png" alt="github icon"/></a>
-                <a href="https://www.linkedin.com/in/kabita-rajbanshi-847633154/" target="_blank"><img src="icons/linkedin.png" alt="linkedin icon"/></a>
-            </div>
+  <main>
+    <!-- Hero -->
+    <section class="hero" id="home">
+      <div class="hero__left">
+        <div class="hero__text reveal">
+          <p class="hero__greeting">Hi, I am</p>
+          <h1 class="hero__name">Kabita Rajbanshi</h1>
+          <p class="hero__role">AI Engineer <span>/</span> Machine Learning Enthusiast</p>
+          <div class="hero__socials">
+            <a href="mailto:kabitarb99@gmail.com" class="social" aria-label="Email">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1zm1 2.4V17h16V7.4l-8 5.3zM5.3 7l6.7 4.5L18.7 7z"/></svg>
+            </a>
+            <a href="https://github.com/Kabitarb" target="_blank" rel="noopener" class="social" aria-label="GitHub">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .5A12 12 0 0 0 0 12.6c0 5.3 3.4 9.9 8.2 11.5.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.4-4-1.4-.6-1.4-1.4-1.8-1.4-1.8-1.1-.8.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1.1 1.9 2.8 1.3 3.5 1 .1-.8.4-1.3.8-1.6-2.7-.3-5.5-1.4-5.5-6a4.7 4.7 0 0 1 1.2-3.2 4.4 4.4 0 0 1 .1-3.2s1-.3 3.3 1.2a11.2 11.2 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2a4.4 4.4 0 0 1 .1 3.2 4.7 4.7 0 0 1 1.2 3.2c0 4.6-2.8 5.7-5.5 6 .4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 24 12.6 12 12 0 0 0 12 .5z"/></svg>
+            </a>
+            <a href="https://www.linkedin.com/in/kabita-rajbanshi-847633154/" target="_blank" rel="noopener" class="social" aria-label="LinkedIn">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 2h-17A1.5 1.5 0 0 0 2 3.5v17A1.5 1.5 0 0 0 3.5 22h17a1.5 1.5 0 0 0 1.5-1.5v-17A1.5 1.5 0 0 0 20.5 2zM8 19H5v-9h3zM6.5 8.3A1.8 1.8 0 1 1 8.3 6.5 1.8 1.8 0 0 1 6.5 8.3zM19 19h-3v-4.7c0-1.4-.5-2.3-1.7-2.3a1.8 1.8 0 0 0-1.7 1.2 2.4 2.4 0 0 0-.1.8V19h-3v-9h3v1.3a3 3 0 0 1 2.7-1.5c2 0 3.8 1.3 3.8 4.1z"/></svg>
+            </a>
+          </div>
+          <a href="#projects" class="btn btn--outline hero__cta">View my work</a>
         </div>
-    </div>
-</main>
-
-    <!---Skills section-->
-    <section class="skills-section">
-        <h2>Skills</h2>
-        <hr class="section-divider" />
-        <div class="skills-container">
-            <div class="skill-box">
-                <img src="icons/programming-icon.png" alt="Programming icon"/>
-                <h3> Programming Languages</h3>
-                <p>Python, MySQL</p>
-            </div>
-            <div class="skill-box">
-                <img src="icons/ml-icon.png" alt="ml icon"/>
-                <h3>Machine Learning</h3>
-                <p>Tensorflow, Scikit-learn</p>
-            </div>
-
-            <div class="skill-box">
-                <img src="icons/analysis-icon.png" alt="data analysis icon"/>
-                <h3>Data Analysis</h3>
-                <p>Pandas, Seaborn</p>
-            </div>
-            
-
+      </div>
+      <div class="hero__right">
+        <div class="hero__photo reveal">
+          <div class="photo-ring"></div>
+          <div class="photo-ring photo-ring--dashed"></div>
+          <img src="photos/gradwcertificate-1.jpg" alt="Kabita Rajbanshi">
         </div>
+      </div>
+      <a href="#about" class="scroll-hint" aria-label="Scroll to about section">
+        <span></span>
+      </a>
     </section>
+
+    <!-- About -->
+    <section class="section section--light" id="about">
+      <div class="container">
+        <h2 class="section-title reveal"><span>About me</span></h2>
+        <p class="section-lead reveal">
+          I am a BSc (Hons) Computer Systems Engineering graduate from ISMT College, affiliated with the
+          University of Sunderland. I build machine learning models end to end &mdash; from cleaning raw data
+          and exploring it, to training, evaluating and deploying models. I am now seeking an entry-level
+          AI Engineer role where I can keep learning while shipping real, measurable results.
+        </p>
+        <p class="explore reveal">Explore</p>
+        <div class="divider reveal" aria-hidden="true"></div>
+
+        <div class="about-grid">
+          <article class="about-card reveal">
+            <div class="about-card__icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a5 5 0 0 1 5 5v1a5 5 0 0 1 3 4.6V13a5 5 0 0 1-3 4.6V18a5 5 0 0 1-10 0v-.4A5 5 0 0 1 4 13v-.4A5 5 0 0 1 7 8V7a5 5 0 0 1 5-5zm-1 2.2A3 3 0 0 0 9 7v2.2a3 3 0 0 0-3 3.4 3 3 0 0 0 3 3.2V17a3 3 0 0 0 2 2.8zm2 0v15.6a3 3 0 0 0 2-2.8v-1.2a3 3 0 0 0 3-3.2 3 3 0 0 0-3-3.4V7a3 3 0 0 0-2-2.8z"/></svg>
+            </div>
+            <h3>Machine Learning</h3>
+            <p>Classification and regression models built with Scikit-learn and TensorFlow, benchmarked quickly with Lazy Predict and fine-tuned for accuracy.</p>
+          </article>
+          <article class="about-card reveal">
+            <div class="about-card__icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h2v16h16v2H3zm4 12 4-5 3 3 5-7 1.6 1.2L15 15.4l-3-3-3.4 4.3z"/></svg>
+            </div>
+            <h3>Data Analysis</h3>
+            <p>Turning messy datasets into insight with Pandas, NumPy, Matplotlib and Seaborn &mdash; exploratory analysis, feature engineering and clear visual storytelling.</p>
+          </article>
+          <article class="about-card reveal">
+            <div class="about-card__icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zm0 2v12h16V6zm2 2h5v2H6zm0 4h9v2H6zm11-4h1v6h-1z"/></svg>
+            </div>
+            <h3>Deployment</h3>
+            <p>Packaging trained models with Joblib and serving them through lightweight Flask APIs so predictions can be used by real applications.</p>
+          </article>
+        </div>
+        <div class="divider reveal" aria-hidden="true"></div>
+      </div>
+    </section>
+
+    <!-- Skills -->
+    <section class="section section--dark" id="skills">
+      <div class="container">
+        <h2 class="section-title section-title--inverse reveal"><span>Skills</span></h2>
+
+        <div class="skills-group reveal">
+          <h3 class="skills-group__title">Using now:</h3>
+          <ul class="skills-grid">
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/python/python-original.svg" alt=""><span>Python</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/scikitlearn/scikitlearn-original.svg" alt=""><span>Scikit-learn</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/pandas/pandas-original.svg" alt=""><span>Pandas</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/numpy/numpy-original.svg" alt=""><span>NumPy</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/matplotlib/matplotlib-original.svg" alt=""><span>Matplotlib</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/mysql/mysql-original.svg" alt=""><span>MySQL</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/jupyter/jupyter-original.svg" alt=""><span>Jupyter</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/git/git-original.svg" alt=""><span>Git</span></li>
+          </ul>
+        </div>
+
+        <div class="skills-group reveal">
+          <h3 class="skills-group__title">Learning now:</h3>
+          <ul class="skills-grid">
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/tensorflow/tensorflow-original.svg" alt=""><span>TensorFlow</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/pytorch/pytorch-original.svg" alt=""><span>PyTorch</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/keras/keras-original.svg" alt=""><span>Keras</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/docker/docker-original.svg" alt=""><span>Docker</span></li>
+          </ul>
+        </div>
+
+        <div class="skills-group reveal">
+          <h3 class="skills-group__title">Other skills:</h3>
+          <ul class="skills-grid">
+            <li class="skill"><img class="skill__icon--invert" src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/flask/flask-original.svg" alt=""><span>Flask</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/html5/html5-original.svg" alt=""><span>HTML5</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/css3/css3-original.svg" alt=""><span>CSS3</span></li>
+            <li class="skill"><img src="https://cdn.jsdelivr.net/gh/devicons/devicon@v2.16.0/icons/javascript/javascript-original.svg" alt=""><span>JavaScript</span></li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- Projects -->
+    <section class="section section--light" id="projects">
+      <div class="container">
+        <h2 class="section-title reveal"><span>Projects</span></h2>
+        <p class="section-lead reveal">
+          A selection of machine learning and data projects I have built. Click any project to see the
+          problem, the approach, the tools used and the results.
+        </p>
+        <div class="filters reveal" role="tablist" aria-label="Filter projects">
+          <button class="filter is-active" data-filter="all" role="tab" aria-selected="true">All</button>
+          <button class="filter" data-filter="ml" role="tab" aria-selected="false">Machine Learning</button>
+          <button class="filter" data-filter="data" role="tab" aria-selected="false">Data Analysis</button>
+        </div>
+        <div class="projects-grid" id="projectsGrid"></div>
+        <p class="projects-empty" id="projectsEmpty" hidden>Projects in this category are in progress &mdash; check back soon.</p>
+        <p class="projects-more reveal">And many more to come!</p>
+      </div>
+    </section>
+
+    <!-- Contact -->
+    <section class="section section--dark" id="contact">
+      <div class="container">
+        <h2 class="section-title section-title--inverse reveal"><span>Contact</span></h2>
+        <p class="section-lead reveal">
+          I am open to entry-level AI / ML roles, internships and collaborations.
+          Drop me a message and I will get back to you as soon as I can.
+        </p>
+
+        <div class="contact-grid">
+          <ul class="contact-info reveal">
+            <li>
+              <span class="contact-info__label">Email</span>
+              <a href="mailto:kabitarb99@gmail.com">kabitarb99@gmail.com</a>
+            </li>
+            <li>
+              <span class="contact-info__label">Phone</span>
+              <a href="tel:+971566546926">+971 56 654 6926</a>
+            </li>
+            <li>
+              <span class="contact-info__label">Find me on</span>
+              <div class="contact-info__links">
+                <a href="https://github.com/Kabitarb" target="_blank" rel="noopener">GitHub</a>
+                <a href="https://www.linkedin.com/in/kabita-rajbanshi-847633154/" target="_blank" rel="noopener">LinkedIn</a>
+                <a href="resume.pdf" target="_blank" rel="noopener">Resume</a>
+              </div>
+            </li>
+          </ul>
+
+          <form class="contact-form reveal" id="contactForm" novalidate>
+            <label class="field">
+              <input type="text" name="name" placeholder="Enter your name*" required>
+            </label>
+            <label class="field">
+              <input type="email" name="email" placeholder="Enter your email*" required>
+            </label>
+            <label class="field">
+              <textarea name="message" rows="4" placeholder="Your message*" required></textarea>
+            </label>
+            <button type="submit" class="btn btn--outline btn--inverse">Submit</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">
+      <a href="#top" class="back-to-top">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 4 8 8-1.4 1.4L13 7.8V20h-2V7.8l-5.6 5.6L4 12z"/></svg>
+        <span>Back to top</span>
+      </a>
+      <div class="footer-socials">
+        <a href="mailto:kabitarb99@gmail.com" aria-label="Email">Email</a>
+        <a href="https://github.com/Kabitarb" target="_blank" rel="noopener" aria-label="GitHub">GitHub</a>
+        <a href="https://www.linkedin.com/in/kabita-rajbanshi-847633154/" target="_blank" rel="noopener" aria-label="LinkedIn">LinkedIn</a>
+      </div>
+      <p class="copyright">&copy; <span id="year"></span> Kabita Rajbanshi. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <!-- Project modal -->
+  <div class="modal" id="projectModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" hidden>
+    <div class="modal__backdrop" data-close></div>
+    <div class="modal__dialog">
+      <button class="modal__close" data-close aria-label="Close">&times;</button>
+      <div class="modal__media">
+        <img id="modalImage" src="" alt="">
+      </div>
+      <div class="modal__body">
+        <span class="modal__tag" id="modalTag"></span>
+        <h3 id="modalTitle"></h3>
+        <p id="modalDescription"></p>
+        <dl class="modal__meta" id="modalMeta"></dl>
+        <ul class="modal__highlights" id="modalHighlights"></ul>
+        <div class="modal__tools" id="modalTools"></div>
+        <div class="modal__actions" id="modalActions"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
 </body>
 </html>
