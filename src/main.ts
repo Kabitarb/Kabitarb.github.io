@@ -178,6 +178,13 @@ document.addEventListener('keydown', (event) => {
 });
 window.matchMedia('(min-width: 641px)').addEventListener('change', closeMenu);
 
+const motionButton = element<HTMLButtonElement>('#motion-toggle');
+motionButton.addEventListener('click', () => {
+  const paused = document.body.classList.toggle('motion-paused');
+  motionButton.setAttribute('aria-pressed', String(paused));
+  motionButton.textContent = paused ? 'Resume motion' : 'Pause motion';
+});
+
 element('#copy-email').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(state.data.profile.email);

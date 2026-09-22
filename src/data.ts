@@ -42,10 +42,10 @@ export const defaultPortfolio: Portfolio = {
   profile: {
     name: 'Kabita Rajbanshi',
     shortName: 'Kabita',
-    role: 'AI & Machine Learning',
-    availability: 'Open to AI & ML opportunities',
+    role: 'Aspiring AI Engineer',
+    availability: 'Open to entry-level opportunities',
     tagline:
-      'I explore data, build machine learning models, and turn complex problems into thoughtful, practical solutions.',
+      'A Computer Systems Engineering graduate exploring data, building machine learning projects, and learning by doing.',
     about:
       'I’m Kabita, a Computer Systems Engineering graduate drawn to the possibilities of artificial intelligence. I enjoy making sense of messy data and understanding the “why” behind a model’s predictions.',
     approach:
@@ -59,7 +59,7 @@ export const defaultPortfolio: Portfolio = {
   projects: [
     {
       id: 'music',
-      title: 'Finding patterns in sound',
+      title: 'Music Genre Classification',
       category: 'Machine Learning',
       description:
         'Exploring how audio features and machine learning can help us understand and classify musical genres.',
@@ -76,7 +76,7 @@ export const defaultPortfolio: Portfolio = {
     },
     {
       id: 'health',
-      title: 'A data lens on diabetes',
+      title: 'Diabetes Prediction',
       category: 'Machine Learning',
       description:
         'Comparing classification models to explore the relationship between health indicators and diabetes.',
@@ -93,7 +93,7 @@ export const defaultPortfolio: Portfolio = {
     },
     {
       id: 'honey',
-      title: 'The story behind the honey',
+      title: 'Honey Production Prediction',
       category: 'Data Science',
       description:
         'Exploring US honey production trends and bringing a regression model to life with a simple web app.',

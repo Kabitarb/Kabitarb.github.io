@@ -1,4 +1,7 @@
 const paths: Record<string, string> = {
+  mail: '<rect x="3" y="5" width="18" height="14" rx="1"/><path d="m3 5 9 7 9-7"/>',
+  linkedin:
+    '<rect x="3" y="3" width="18" height="18" rx="1"/><path d="M7 10v7m0-10v.1M11 17v-7m0 3c0-4 6-4 6 0v4"/>',
   'arrow-down': '<path d="M12 4v16m-6-6 6 6 6-6"/>',
   'arrow-up-right': '<path d="M6 18 18 6M6 6h12v12"/>',
   download: '<path d="M12 3v12m-5-5 5 5 5-5M5 15v5h14v-5"/>',

@@ -32,7 +32,7 @@ export function renderProjects(projects: Project[], category: string): string {
       <div class="project-kicker"><span>${escapeHtml(project.category)}</span><span>0${index + 1}</span></div>
       <h3>${escapeHtml(project.title)}</h3><p>${escapeHtml(project.description)}</p>
       <div class="project-tags">${project.tags.map((tag) => `<span>${escapeHtml(tag)}</span>`).join('')}</div>
-      <div class="project-bottom"><button class="case-link" data-project="${index}" aria-label="Read case study: ${escapeHtml(project.title)}">Inside the project ${icon('arrow-up-right')}</button><a href="${escapeHtml(project.source)}" target="_blank" rel="noopener noreferrer" aria-label="Source code: ${escapeHtml(project.title)}">${icon('github')}</a></div>
+      <div class="project-bottom"><button class="case-link" data-project="${index}" aria-haspopup="dialog" aria-label="Read case study: ${escapeHtml(project.title)}">View project ${icon('arrow-up-right')}</button><a href="${escapeHtml(project.source)}" target="_blank" rel="noopener noreferrer" aria-label="Source code: ${escapeHtml(project.title)}">${icon('github')}</a></div>
     </div></article>`;
     })
     .join('');
