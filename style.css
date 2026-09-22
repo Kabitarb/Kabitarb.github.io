@@ -1658,6 +1658,7 @@ dialog[open] {
 }
 .studio-footer {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
@@ -1668,6 +1669,19 @@ dialog[open] {
   backdrop-filter: blur(8px);
   border-top: 1px solid #e8dfed;
   margin-top: 24px;
+}
+.studio-feedback {
+  flex-basis: 100%;
+  font-size: 12px;
+  color: var(--purple);
+  overflow-wrap: anywhere;
+}
+.studio-feedback p {
+  margin: 0;
+}
+.studio-feedback:has(.form-error:not(:empty)) #studio-status,
+.studio-feedback:not(:has(p:not(:empty))) {
+  display: none;
 }
 .studio-footer > span {
   display: flex;

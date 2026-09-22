@@ -38,6 +38,13 @@ let toastTimer = 0;
 const caseDialog = element<HTMLDialogElement>('#case-dialog');
 
 export function toast(message: string): void {
+  const studioStatus = document.querySelector<HTMLElement>(
+    '#studio-dialog[open] #studio-status',
+  );
+  if (studioStatus) {
+    studioStatus.textContent = message;
+    return;
+  }
   const target = element('#toast');
   target.textContent = message;
   target.classList.add('visible');
@@ -239,6 +246,7 @@ async function setupStudio(): Promise<void> {
   const studio = element<HTMLDialogElement>('#studio-dialog');
   const form = element<HTMLFormElement>('#studio-form');
   const error = element('#studio-error');
+  const status = element('#studio-status');
   const saveButton = form.querySelector<HTMLButtonElement>('[type="submit"]')!;
   const exportButton = element<HTMLButtonElement>('#export-site');
   let draftPhoto: Blob | null = null;
@@ -346,6 +354,7 @@ async function setupStudio(): Promise<void> {
     projectFields();
     showPreview();
     error.textContent = '';
+    status.textContent = '';
     switchTab('profile');
     studio.showModal();
     studio.scrollTop = 0;
@@ -402,6 +411,7 @@ async function setupStudio(): Promise<void> {
       if (!file) return;
       const currentRevision = revision;
       error.textContent = '';
+      status.textContent = '';
       setBusy(1);
       try {
         const blob =
@@ -437,6 +447,7 @@ async function setupStudio(): Promise<void> {
     event.preventDefault();
     if (busy) return;
     error.textContent = '';
+    status.textContent = '';
     const invalid = form.querySelector<HTMLInputElement | HTMLTextAreaElement>(
       ':invalid',
     );
@@ -466,6 +477,7 @@ async function setupStudio(): Promise<void> {
   exportButton.addEventListener('click', async () => {
     if (busy) return;
     error.textContent = '';
+    status.textContent = '';
     setBusy(1);
     try {
       if (
