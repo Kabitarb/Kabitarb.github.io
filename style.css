@@ -316,6 +316,7 @@ h1 em {
   min-height: 615px;
   padding-block: 65px 69px;
   gap: 18px;
+  overflow-x: clip;
 }
 .availability {
   display: inline-flex;
@@ -2090,7 +2091,6 @@ dialog[open] {
     grid-template-columns: 1fr;
     padding-block: 44px 24px;
     gap: 8px;
-    overflow-x: clip;
   }
   .hero-content {
     max-width: 440px;
