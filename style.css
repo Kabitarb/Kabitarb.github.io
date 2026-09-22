@@ -2090,6 +2090,7 @@ dialog[open] {
     grid-template-columns: 1fr;
     padding-block: 44px 24px;
     gap: 8px;
+    overflow-x: clip;
   }
   .hero-content {
     max-width: 440px;
