@@ -359,6 +359,7 @@ em {
   width: 100%;
   min-width: 0;
   min-height: 460px;
+  overflow: clip;
   display: flex;
   align-items: center;
   justify-content: center;
