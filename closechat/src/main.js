@@ -229,7 +229,7 @@ function renderCalls() {
   el.innerHTML = log.map((c, i) => `<div class="item" data-i="${i}">
     <div class="avatar" style="background:${colorOf(c.peer)}">${esc(initials(app.nameOf(c.peer)))}</div>
     <div class="body"><div class="top"><span class="name" style="${c.missed ? 'color:var(--danger)' : ''}">${esc(app.nameOf(c.peer))}</span><span class="time">${fmtListTime(c.ts)}</span></div>
-    <div class="preview"><span>${c.dir === 'in' ? (c.missed ? 'Missed' : 'Incoming') : 'Outgoing'} ${c.video ? 'video' : 'voice'} call${c.dur ? ' · ' + fmtDur(c.dur) : ''}</span></div></div>
+    <div class="preview"><span>${c.dir === 'in' ? (c.reason === 'declined' ? 'Declined' : c.missed ? 'Missed' : 'Incoming') : c.reason === 'declined' ? 'Outgoing (declined)' : c.reason === 'no-answer' ? 'Outgoing (no answer)' : 'Outgoing'} ${c.video ? 'video' : 'voice'} call${c.dur ? ' · ' + fmtDur(c.dur) : ''}</span></div></div>
     <button class="icon-btn call-icon ${c.missed ? 'missed' : ''}" title="Call back">${c.video ? '<svg viewBox="0 0 24 24"><path d="M3 6h12a2 2 0 0 1 2 2v2.5l4-2.5v8l-4-2.5V16a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02Z"/></svg>'}</button></div>`).join('');
   el.querySelectorAll('.item').forEach((i) => {
     const c = log[Number(i.dataset.i)];
@@ -350,6 +350,7 @@ function closeChat() {
 }
 $('back-btn').onclick = closeChat;
 
+let scrollNext = false;
 function renderChat(scrollToEnd = false) {
   const pk = app.openChat; if (!pk) return;
   const f = app.state.friends[pk] || {};
@@ -389,7 +390,7 @@ function renderChat(scrollToEnd = false) {
     box.innerHTML = html;
     box.querySelectorAll('img[data-full]').forEach((img) => { img.onclick = () => { $('viewer').querySelector('img').src = img.src; $('viewer').classList.remove('hidden'); }; });
     box.querySelectorAll('[data-resend]').forEach((el) => { el.onclick = () => app.resend(pk, el.dataset.resend); });
-    if (scrollToEnd || atBottom) box.scrollTop = box.scrollHeight;
+    if (scrollToEnd || atBottom || scrollNext) { box.scrollTop = box.scrollHeight; scrollNext = false; }
   }
 }
 function updateTyping() {
@@ -415,7 +416,7 @@ async function send() {
   if (text.length > 20000) { toast('Message too long (max 20,000 characters)', 'error'); return; }
   input.value = ''; autosize(); app.store.chat(pk).draft = '';
   $('emoji-picker').classList.add('hidden');
-  renderChat(true);
+  scrollNext = true; renderChat(true);
   const m = await app.sendMessage(pk, { text });
   if (m.status === 'failed') toast('Could not send: ' + (m.error || 'no relay reachable'), 'error');
 }
@@ -425,7 +426,7 @@ $('file-input').onchange = async () => {
   if (!file || !app.openChat) return;
   try {
     const dataUrl = await compressImage(file);
-    renderChat(true);
+    scrollNext = true; renderChat(true);
     const m = await app.sendMessage(app.openChat, { img: dataUrl });
     if (m.status === 'failed') toast('Could not send photo: ' + (m.error || 'no relay reachable'), 'error');
   } catch (e) { toast('Could not read that image', 'error'); }
