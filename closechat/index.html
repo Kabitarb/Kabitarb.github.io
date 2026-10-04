@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark" data-accent="blue">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<title>CloseChat</title>
+<meta name="description" content="Private, end-to-end encrypted messaging and calls for your close friends only.">
+<meta name="theme-color" content="#0b1016">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="CloseChat">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ============ AUTH ============ -->
+<div id="auth" class="screen">
+  <div class="auth-card">
+    <div class="logo"><svg viewBox="0 0 64 64" width="56" height="56"><use href="icons/icon.svg#logo"/></svg></div>
+    <h1>CloseChat</h1>
+    <p class="muted">Private messages &amp; calls for your close friends only.<br>Everything is encrypted on your device.</p>
+
+    <form id="login-form" class="auth-form" autocomplete="on">
+      <input id="login-user" type="text" placeholder="Username" autocapitalize="none" autocomplete="username" required>
+      <input id="login-pass" type="password" placeholder="Password" autocomplete="current-password" required>
+      <button class="btn primary" type="submit">Log In</button>
+      <div class="auth-error" id="login-error"></div>
+      <div class="progress hidden" id="login-progress"><div></div></div>
+      <a href="#" class="link" id="show-signup">Create new account</a>
+    </form>
+
+    <form id="signup-form" class="auth-form hidden" autocomplete="on">
+      <input id="signup-name" type="text" placeholder="Your name (shown to friends)" autocomplete="name" maxlength="40" required>
+      <input id="signup-user" type="text" placeholder="Username" autocapitalize="none" autocomplete="username" minlength="3" required>
+      <input id="signup-pass" type="password" placeholder="Password (12+ characters)" autocomplete="new-password" minlength="12" required>
+      <input id="signup-pass2" type="password" placeholder="Confirm password" autocomplete="new-password" required>
+      <label class="check"><input type="checkbox" id="signup-ack" required> I understand there is <b>no password reset</b>: my password is my encryption key.</label>
+      <button class="btn primary" type="submit">Create Account</button>
+      <div class="auth-error" id="signup-error"></div>
+      <div class="progress hidden" id="signup-progress"><div></div></div>
+      <a href="#" class="link" id="show-login">Already have an account? Log in</a>
+    </form>
+    <p class="tiny muted">No phone number, no email, no servers of ours. Your account lives only on your devices.</p>
+  </div>
+</div>
+
+<!-- ============ MAIN ============ -->
+<div id="main" class="screen hidden">
+  <aside id="side">
+    <header class="side-header">
+      <button class="avatar me" id="me-avatar" title="Settings"></button>
+      <h2 id="side-title">Chats</h2>
+      <span class="conn" id="conn" title="Relay connection"><i></i></span>
+      <button class="icon-btn" id="add-friend-btn" title="Add friend">
+        <svg viewBox="0 0 24 24"><path d="M15 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm-9 8a9 9 0 0 1 18 0ZM6 8v2H4v2H2v-2H0V8h2V6h2v2Z" transform="translate(1 0) scale(.95)"/></svg>
+      </button>
+    </header>
+    <div class="side-body">
+      <section class="tab-pane" data-pane="chats"><div class="search"><input id="chat-search" type="search" placeholder="Search friends"></div><div id="chat-list" class="list"></div></section>
+      <section class="tab-pane hidden" data-pane="calls"><div id="call-list" class="list"></div></section>
+      <section class="tab-pane hidden" data-pane="requests"><div id="request-list" class="list"></div></section>
+      <section class="tab-pane hidden" data-pane="settings"><div id="settings" class="settings"></div></section>
+    </div>
+    <nav class="tabbar">
+      <button data-tab="chats" class="active"><svg viewBox="0 0 24 24"><path d="M12 3C6.5 3 2 6.9 2 11.7c0 2.5 1.2 4.7 3.2 6.3L4.5 21l3.6-1.9c1.2.4 2.5.6 3.9.6 5.5 0 10-3.9 10-8.7S17.5 3 12 3Z"/></svg><span>Chats</span></button>
+      <button data-tab="calls"><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02Z"/></svg><span>Calls</span></button>
+      <button data-tab="requests"><svg viewBox="0 0 24 24"><path d="M12 12a5 5 0 1 0-5-5 5 5 0 0 0 5 5Zm0 2c-5 0-9 2.5-9 5.5V21h18v-1.5c0-3-4-5.5-9-5.5Z"/></svg><span>Requests</span><b class="badge hidden" id="req-badge"></b></button>
+      <button data-tab="settings"><svg viewBox="0 0 24 24"><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.7 7.7 0 0 0-1.7-1L15 3H9l-.3 2.9a7.7 7.7 0 0 0-1.7 1l-2.5-1-2 3.5L4.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.7 7.7 0 0 0 1.7 1L9 21h6l.3-2.9a7.7 7.7 0 0 0 1.7-1l2.5 1 2-3.5ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z"/></svg><span>Settings</span></button>
+    </nav>
+  </aside>
+
+  <section id="chat">
+    <div class="empty" id="chat-empty">
+      <svg viewBox="0 0 64 64" width="72" height="72"><use href="icons/icon.svg#logo"/></svg>
+      <h3>Your conversations are private</h3>
+      <p class="muted">Pick a friend to start chatting. Messages and calls are end-to-end encrypted — only your two devices can read them.</p>
+    </div>
+    <div class="chat-inner hidden" id="chat-inner">
+      <header class="chat-header">
+        <button class="icon-btn" id="back-btn" title="Back"><svg viewBox="0 0 24 24"><path d="M15.5 4 8 12l7.5 8 1.5-1.5L10.9 12 17 5.5Z"/></svg></button>
+        <div class="avatar" id="chat-avatar"></div>
+        <div class="chat-title"><div class="name" id="chat-name"></div><div class="sub" id="chat-sub">End-to-end encrypted</div></div>
+        <button class="icon-btn" id="audio-call-btn" title="Voice call"><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02Z"/></svg></button>
+        <button class="icon-btn" id="video-call-btn" title="Video call"><svg viewBox="0 0 24 24"><path d="M3 6h12a2 2 0 0 1 2 2v2.5l4-2.5v8l-4-2.5V16a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/></svg></button>
+        <button class="icon-btn" id="chat-menu-btn" title="More"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
+      </header>
+      <div class="request-banner hidden" id="request-banner">
+        <p><b id="request-banner-name"></b> isn't in your close friends yet. Accept to chat and call, or block.</p>
+        <div><button class="btn primary small" id="banner-accept">Accept</button><button class="btn ghost small" id="banner-block">Block</button></div>
+      </div>
+      <div class="messages" id="messages"></div>
+      <div class="typing hidden" id="typing"><span></span><span></span><span></span></div>
+      <div class="emoji-picker hidden" id="emoji-picker"></div>
+      <footer class="composer" id="composer">
+        <button class="icon-btn" id="attach-btn" title="Send photo"><svg viewBox="0 0 24 24"><path d="M4 5h3l1.5-2h7L17 5h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm8 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg></button>
+        <input type="file" id="file-input" accept="image/*" hidden>
+        <textarea id="input" rows="1" placeholder="Message"></textarea>
+        <button class="icon-btn" id="emoji-btn" title="Emoji"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM7 14h10a5 5 0 0 1-10 0Z"/></svg></button>
+        <button class="icon-btn send" id="send-btn" title="Send"><svg viewBox="0 0 24 24"><path d="M3 11.5 21 3l-4 18-5-7.5Z"/></svg></button>
+      </footer>
+    </div>
+  </section>
+</div>
+
+<!-- ============ CALL ============ -->
+<div id="call" class="overlay hidden">
+  <video id="remote-video" autoplay playsinline></video>
+  <video id="local-video" autoplay playsinline muted class="hidden"></video>
+  <div class="call-info">
+    <div class="avatar xl" id="call-avatar"></div>
+    <h2 id="call-name"></h2>
+    <div class="muted" id="call-status"></div>
+  </div>
+  <div class="call-controls" id="call-controls">
+    <button class="round" id="mute-btn" title="Mute"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm6-3h-2a4 4 0 0 1-8 0H6a6 6 0 0 0 5 5.9V21h2v-3.1A6 6 0 0 0 18 12Z"/></svg></button>
+    <button class="round" id="cam-btn" title="Camera"><svg viewBox="0 0 24 24"><path d="M3 6h12a2 2 0 0 1 2 2v2.5l4-2.5v8l-4-2.5V16a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/></svg></button>
+    <button class="round" id="flip-btn" title="Flip camera"><svg viewBox="0 0 24 24"><path d="M12 6V3L8 7l4 4V8a5 5 0 0 1 4.9 6h2.1A7 7 0 0 0 12 6Zm0 12v3l4-4-4-4v3a5 5 0 0 1-4.9-6H5a7 7 0 0 0 7 8Z"/></svg></button>
+    <button class="round danger" id="hangup-btn" title="End call"><svg viewBox="0 0 24 24"><path d="M12 9c-2.9 0-5.6.6-8 1.7-.5.2-.8.8-.7 1.4l.9 3.3c.1.6.7 1 1.3.9 1.1-.3 2.2-.5 3.4-.6.5 0 .9-.5.9-1v-2.3c.7-.1 1.4-.2 2.2-.2s1.5.1 2.2.2v2.3c0 .5.4 1 .9 1 1.2.1 2.3.3 3.4.6.6.1 1.2-.3 1.3-.9l.9-3.3c.1-.6-.2-1.2-.7-1.4C17.6 9.6 14.9 9 12 9Z"/></svg></button>
+  </div>
+  <div class="call-controls hidden" id="incoming-controls">
+    <button class="round danger" id="decline-btn" title="Decline"><svg viewBox="0 0 24 24"><path d="M12 9c-2.9 0-5.6.6-8 1.7-.5.2-.8.8-.7 1.4l.9 3.3c.1.6.7 1 1.3.9 1.1-.3 2.2-.5 3.4-.6.5 0 .9-.5.9-1v-2.3c.7-.1 1.4-.2 2.2-.2s1.5.1 2.2.2v2.3c0 .5.4 1 .9 1 1.2.1 2.3.3 3.4.6.6.1 1.2-.3 1.3-.9l.9-3.3c.1-.6-.2-1.2-.7-1.4C17.6 9.6 14.9 9 12 9Z"/></svg></button>
+    <button class="round success" id="accept-btn" title="Accept"><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02Z"/></svg></button>
+  </div>
+</div>
+
+<div id="modal" class="overlay hidden"><div class="sheet" id="modal-body"></div></div>
+<div id="viewer" class="overlay hidden"><img alt=""></div>
+<div id="toasts"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
