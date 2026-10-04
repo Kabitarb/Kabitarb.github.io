@@ -164,7 +164,7 @@ function aiTick() {
       ai.backoffUntil = performance.now() + (e.retryAfterMs || (e.status === 400 || e.status === 403 ? 15000 : 4000));
       updateChip(lastResult.columns);
     })
-    .finally(() => { ai.inflight = false; });
+    .finally(() => { ai.inflight = false; updateChip(lastResult.columns); });
 }
 
 // Large camera movement makes old boxes meaningless: drop them.
