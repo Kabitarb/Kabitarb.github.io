@@ -110,7 +110,7 @@ function loop() {
   if (!running) return;
   const ready = srcW() && (demo || video.readyState >= 2);
   if (!frozen && ready) {
-    if (useAI()) aiTick(); else processFrame();
+    if (useAI()) aiTick(); else if (net) processFrame();
   }
   draw();
   requestAnimationFrame(loop);
@@ -186,11 +186,11 @@ function motionReset() {
 
 function updateChip(columns) {
   let tail = '';
-  if (useAI()) {
-    if (ai.error) tail = `<span class="warn">${escapeHtml(ai.error)}</span>`;
-    else tail = `<span class="fps">${ai.inflight ? 'scanning…' : (ai.count ? `AI ${(ai.lastLatency / 1000).toFixed(1)}s` : 'AI')}</span>`;
-  } else tail = `<span class="fps">${fps.toFixed(0)} fps</span>`;
-  if (!columns.length) { chip.innerHTML = (ai.error && useAI() ? '' : 'Point at handwritten numbers ') + tail; return; }
+  if (ai.error) tail = `<span class="warn">${escapeHtml(ai.error)}</span>`;
+  else if (useAI()) tail = `<span class="fps">${ai.inflight ? 'scanning…' : (ai.count ? `AI ${(ai.lastLatency / 1000).toFixed(1)}s` : 'AI')}</span>`;
+  else if (!net) tail = `<span class="fps">loading…</span>`;
+  else tail = `<span class="fps">${fps.toFixed(0)} fps</span>`;
+  if (!columns.length) { chip.innerHTML = (ai.error ? '' : 'Point at handwritten numbers ') + tail; return; }
   const parts = columns.map((c, i) => `<b style="color:${PALETTE[i % PALETTE.length]}">${fmt(c.total)}</b>`);
   chip.innerHTML = `${columns.length} column${columns.length === 1 ? '' : 's'} · ${parts.join(' &nbsp; ')}` + tail;
 }
@@ -304,12 +304,13 @@ saveBtn.addEventListener('click', async () => {
   saveSettings(); panel.hidden = true;
   ai = { inflight: false, lastSent: 0, backoffUntil: 0, error: '', count: 0, lastLatency: 0 };
   if (running) {
-    if (!useAI() && !net) {
-      try { net = await DigitNet.load('./digits.json'); } catch (e) { ai.error = 'Could not load on-device model'; }
-    }
     configureTracker();
     lastResult = { numbers: [], columns: [], circles: [] };
     updateChip([]);
+    if (!useAI() && !net) {
+      try { net = await DigitNet.load('./digits.json'); } catch (e) { ai.error = 'Could not load on-device model'; }
+      updateChip([]);
+    }
   }
   updateIntro();
 });
