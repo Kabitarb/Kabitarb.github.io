@@ -194,7 +194,7 @@ async function startApp(sk, newName, username) {
   app.start().then(() => {
     if (newName) app.syncToSelf({ t: 'profile', name: newName, u: store.state.profile.username });
     app.discoverable = !!settings.get().discoverable;
-    if (app.discoverable && store.state.profile.username) app.publishDirectory(true);
+    if (store.state.profile.username) app.publishDirectory(app.discoverable);
   }).catch((e) => toast('Relay connection failed: ' + e.message, 'error'));
   if (s.notifications && 'Notification' in window && Notification.permission === 'default') {
     setTimeout(() => Notification.requestPermission().catch(() => {}), 1500);
