@@ -14,7 +14,9 @@ export const WRAP_KIND = 1059;        // stored by relays (messages, receipts, f
 export const EPHEMERAL_WRAP_KIND = 21059; // not stored (typing, call signaling)
 export const KIND_TEXT = 14;
 export const KIND_IMAGE = 15;
+export const KIND_STICKER = 16;
 export const KIND_CONTROL = 30;
+export const DIRECTORY_KIND = 30078; // public username -> identity pointer (opt-in)
 
 export function normalizeUsername(u) {
   return (u || '').trim().toLowerCase().replace(/\s+/g, '');
@@ -113,3 +115,15 @@ export async function localCipher(sk) {
 }
 
 export function shortId(pk) { return pk.slice(0, 8); }
+
+export function directoryTag(username) { return 'closechat:user:' + normalizeUsername(username); }
+// Signed, replaceable "I am <username>" pointer so friends can find you by
+// username. Contains no avatar and nothing private; publishing is optional.
+export function directoryEvent(sk, username, name, remove = false) {
+  return finalizeEvent({
+    kind: DIRECTORY_KIND,
+    content: remove ? '' : JSON.stringify({ u: normalizeUsername(username), n: String(name || '').slice(0, 40) }),
+    tags: [['d', directoryTag(username)]],
+    created_at: now(),
+  }, sk);
+}

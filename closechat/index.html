@@ -55,6 +55,7 @@
       <button class="avatar me" id="me-avatar" title="Settings"></button>
       <h2 id="side-title">Chats</h2>
       <span class="conn" id="conn" title="Relay connection"><i></i></span>
+      <button class="icon-btn" id="new-group-btn" title="New group"><svg viewBox="0 0 24 24"><path d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7 1a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-7 1c-3.9 0-7 2-7 4.5V20h14v-2.5C16 15 12.9 13 9 13Zm7 1c-.6 0-1.2.1-1.8.2 1.7 1 2.8 2.4 2.8 4.3V20h6v-2c0-2.2-3.1-4-7-4Z"/></svg></button>
       <button class="icon-btn" id="add-friend-btn" title="Add friend">
         <svg viewBox="0 0 24 24"><path d="M15 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm-9 8a9 9 0 0 1 18 0ZM6 8v2H4v2H2v-2H0V8h2V6h2v2Z" transform="translate(1 0) scale(.95)"/></svg>
       </button>
@@ -86,15 +87,21 @@
         <div class="chat-title"><div class="name" id="chat-name"></div><div class="sub" id="chat-sub">End-to-end encrypted</div></div>
         <button class="icon-btn" id="audio-call-btn" title="Voice call"><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02Z"/></svg></button>
         <button class="icon-btn" id="video-call-btn" title="Video call"><svg viewBox="0 0 24 24"><path d="M3 6h12a2 2 0 0 1 2 2v2.5l4-2.5v8l-4-2.5V16a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/></svg></button>
+        <button class="icon-btn" id="together-btn" title="Watch & play together"><svg viewBox="0 0 24 24"><path d="M7 6h10a5 5 0 0 1 5 5v2a5 5 0 0 1-5 5h-1.5l-2.1-2.5h-2.8L8.5 18H7a5 5 0 0 1-5-5v-2a5 5 0 0 1 5-5Zm1 3v2H6v2h2v2h2v-2h2v-2h-2V9Zm8 0a1.2 1.2 0 1 0 0 2.4A1.2 1.2 0 0 0 16 9Zm2 3a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Z"/></svg></button>
         <button class="icon-btn" id="chat-menu-btn" title="More"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
       </header>
       <div class="request-banner hidden" id="request-banner">
         <p><b id="request-banner-name"></b> isn't in your close friends yet. Accept to chat and call, or block.</p>
         <div><button class="btn primary small" id="banner-accept">Accept</button><button class="btn ghost small" id="banner-block">Block</button></div>
       </div>
-      <div class="messages" id="messages"></div>
-      <div class="typing hidden" id="typing"><span></span><span></span><span></span></div>
-      <div class="emoji-picker hidden" id="emoji-picker"></div>
+      <div class="messages-wrap">
+        <div class="messages" id="messages"></div>
+        <button class="jump hidden" id="jump-btn" title="Jump to latest"><svg viewBox="0 0 24 24"><path d="M12 16.5 4.5 9 6 7.5l6 6 6-6L19.5 9Z"/></svg><b id="jump-count" class="hidden"></b></button>
+      </div>
+      <div class="typing hidden" id="typing"><span></span><span></span><span></span><em id="typing-who"></em></div>
+      <div class="reply-bar hidden" id="reply-bar"><div class="quote"><b id="reply-name"></b><span id="reply-text"></span></div><button class="icon-btn" id="reply-cancel" title="Cancel reply"><svg viewBox="0 0 24 24"><path d="m6 5 13 13-1 1L5 6Zm13 1L6 19l-1-1L18 5Z"/></svg></button></div>
+      <div class="picker hidden" id="picker"><div class="picker-tabs" id="picker-tabs"></div><div class="picker-body" id="picker-body"></div></div>
+      <div class="left-note hidden" id="left-note">You are no longer in this group.</div>
       <footer class="composer" id="composer">
         <button class="icon-btn" id="attach-btn" title="Send photo"><svg viewBox="0 0 24 24"><path d="M4 5h3l1.5-2h7L17 5h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm8 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg></button>
         <input type="file" id="file-input" accept="image/*" hidden>
@@ -119,6 +126,8 @@
     <button class="round" id="mute-btn" title="Mute"><svg viewBox="0 0 24 24"><path d="M12 15a3 3 0 0 0 3-3V6a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3Zm6-3h-2a4 4 0 0 1-8 0H6a6 6 0 0 0 5 5.9V21h2v-3.1A6 6 0 0 0 18 12Z"/></svg></button>
     <button class="round" id="cam-btn" title="Camera"><svg viewBox="0 0 24 24"><path d="M3 6h12a2 2 0 0 1 2 2v2.5l4-2.5v8l-4-2.5V16a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/></svg></button>
     <button class="round" id="flip-btn" title="Flip camera"><svg viewBox="0 0 24 24"><path d="M12 6V3L8 7l4 4V8a5 5 0 0 1 4.9 6h2.1A7 7 0 0 0 12 6Zm0 12v3l4-4-4-4v3a5 5 0 0 1-4.9-6H5a7 7 0 0 0 7 8Z"/></svg></button>
+    <button class="round hidden" id="speaker-btn" title="Speaker"><svg viewBox="0 0 24 24"><path d="M3 9v6h4l5 4V5L7 9H3Zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4ZM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6Z"/></svg></button>
+    <button class="round" id="call-watch-btn" title="Watch together"><svg viewBox="0 0 24 24"><path d="M4 5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-5l1 2H8l1-2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm6 3.5v6l5-3Z"/></svg></button>
     <button class="round danger" id="hangup-btn" title="End call"><svg viewBox="0 0 24 24"><path d="M12 9c-2.9 0-5.6.6-8 1.7-.5.2-.8.8-.7 1.4l.9 3.3c.1.6.7 1 1.3.9 1.1-.3 2.2-.5 3.4-.6.5 0 .9-.5.9-1v-2.3c.7-.1 1.4-.2 2.2-.2s1.5.1 2.2.2v2.3c0 .5.4 1 .9 1 1.2.1 2.3.3 3.4.6.6.1 1.2-.3 1.3-.9l.9-3.3c.1-.6-.2-1.2-.7-1.4C17.6 9.6 14.9 9 12 9Z"/></svg></button>
   </div>
   <div class="call-controls hidden" id="incoming-controls">
@@ -126,6 +135,19 @@
     <button class="round success" id="accept-btn" title="Accept"><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02Z"/></svg></button>
   </div>
 </div>
+
+<!-- ============ TOGETHER PANELS ============ -->
+<div id="watch" class="panel hidden">
+  <header><span class="ptitle" id="watch-title">Watching together</span><button class="btn ghost small" id="watch-change">Change clip</button><button class="icon-btn" id="watch-close" title="Stop watching"><svg viewBox="0 0 24 24"><path d="m6 5 13 13-1 1L5 6Zm13 1L6 19l-1-1L18 5Z"/></svg></button></header>
+  <div class="watch-frame"><iframe id="watch-frame" title="Shared clip" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+  <div class="pfoot" id="watch-foot"></div>
+</div>
+<div id="game" class="panel hidden">
+  <header><span class="ptitle" id="game-title">Game</span><button class="btn ghost small" id="game-hide">Hide</button><button class="btn danger small" id="game-quit">Leave</button></header>
+  <div class="game-body" id="game-body"></div>
+</div>
+<div id="invite-bar" class="invite-bar hidden"><span id="invite-text"></span><button class="btn primary small" id="invite-join">Join</button><button class="btn ghost small" id="invite-dismiss">Later</button></div>
+<input type="file" id="avatar-input" accept="image/*" hidden>
 
 <div id="modal" class="overlay hidden"><div class="sheet" id="modal-body"></div></div>
 <div id="viewer" class="overlay hidden"><img alt=""></div>
