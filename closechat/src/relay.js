@@ -73,12 +73,14 @@ export class Transport {
     const evs = await this.pool.querySync(this.relays, { kinds: [DIRECTORY_KIND], '#d': [tag] }, { maxWait: 6000 });
     const byPk = new Map();
     for (const ev of evs) {
-      if (!verifyEvent(ev) || !ev.content) continue;
-      let c; try { c = JSON.parse(ev.content); } catch { continue; }
-      if (c.u !== tag.slice('closechat:user:'.length)) continue;
+      if (!verifyEvent(ev)) continue;
+      let c = null;
+      if (ev.content) { try { c = JSON.parse(ev.content); } catch { continue; } if (c.u !== tag.slice('closechat:user:'.length)) continue; }
       const prev = byPk.get(ev.pubkey);
-      if (!prev || prev.created_at < ev.created_at) byPk.set(ev.pubkey, { pk: ev.pubkey, name: c.n || '', created_at: ev.created_at });
+      // keep the newest record per identity; an empty one means "removed"
+      if (!prev || prev.created_at < ev.created_at) byPk.set(ev.pubkey, { pk: ev.pubkey, name: c ? c.n || '' : '', created_at: ev.created_at, removed: !c });
     }
+    for (const [pk, r] of byPk) if (r.removed) byPk.delete(pk);
     return [...byPk.values()].sort((a, b) => a.created_at - b.created_at);
   }
 

@@ -138,7 +138,12 @@ export class App extends EventTarget {
       if (q.length < 100) q.push(rumor);
       return;
     }
-    if (m.from !== this.pk && (!g.members.includes(m.from) || this.isBlocked(m.from))) return;
+    if (m.from !== this.pk && this.isBlocked(m.from)) return;
+    if (m.from !== this.pk && !g.members.includes(m.from)) {
+      const q = this.pendingGroup[gid] || (this.pendingGroup[gid] = []);
+      if (q.length < 100 && !q.includes(rumor)) q.push(rumor);
+      return;
+    }
     if (!g.members.includes(this.pk)) return;
     const chatId = 'g:' + gid;
     const chat = this.store.chat(chatId);
@@ -180,6 +185,10 @@ export class App extends EventTarget {
       this.handleGroupControl(this.pk, c, rumor);
     } else if (c.t === 'game') {
       if (this.gameHandler) this.gameHandler(this.chatIdFor(this.pk, c), this.pk, c, rumor);
+    } else if (c.t === 'calllog' && c.e && typeof c.e === 'object' && /^[0-9a-f]{64}$/.test(c.e.peer || '')) {
+      const e = c.e;
+      this.logCall({ id: String(e.id || rumor.id).slice(0, 64), peer: e.peer, dir: e.dir === 'out' ? 'out' : 'in', video: !!e.video, ts: Number(e.ts) || rumor.created_at * 1000, dur: Number(e.dur) || 0, missed: !!e.missed, reason: String(e.reason || '').slice(0, 20) }, true);
+      this.emit('calls');
     }
   }
 
@@ -260,13 +269,16 @@ export class App extends EventTarget {
       if (!c.m.includes(this.pk)) { if (existing && from !== this.pk) this.systemMessage('g:' + gid, `${this.nameOf(from)} removed you`); return; }
       const allowed = from === this.pk || this.isFriend(from) || (existing && existing.members.includes(from));
       if (!allowed) return;
-      if (existing && c.ts && c.ts < (existing.ts || 0)) return; // older snapshot
-      const g = existing || (this.state.groups[gid] = { name: '', members: [], admin: from, since: Date.now(), ts: 0 });
+      const newer = !existing || !c.ts || c.ts >= (existing.ts || 0);
+      const g = existing || (this.state.groups[gid] = { name: '', members: [], admin: from, since: Date.now(), ts: 0, left: {} });
+      g.left ||= {};
       const before = new Set(g.members);
-      g.name = String(c.n || g.name || 'Group').slice(0, 40);
-      g.members = c.m.slice();
-      g.ts = c.ts || Date.now();
-      if (c.admin && /^[0-9a-f]{64}$/.test(c.admin)) g.admin = c.admin;
+      // Snapshots can arrive in any order (relays, second device): name/admin are
+      // last-writer-wins by ts, members are a union minus anyone who left later.
+      if (newer) { g.name = String(c.n || g.name || 'Group').slice(0, 40); g.ts = c.ts || Date.now(); if (c.admin && /^[0-9a-f]{64}$/.test(c.admin)) g.admin = c.admin; }
+      else if (!g.name) g.name = String(c.n || 'Group').slice(0, 40);
+      const snapTs = c.ts || 0;
+      for (const p of c.m) if (!g.members.includes(p) && !((g.left[p] || 0) > snapTs)) g.members.push(p);
       for (const p of c.m) if (!this.state.friends[p] && p !== this.pk) this.state.friends[p] = { name: '', status: 'contact', since: Date.now() };
       if (c.names) for (const [p, n] of Object.entries(c.names)) { const f = this.state.friends[p]; if (f && !f.name && p !== this.pk) f.name = String(n).slice(0, 40); }
       this.store.chat('g:' + gid);
@@ -274,7 +286,7 @@ export class App extends EventTarget {
       else {
         const added = c.m.filter((p) => !before.has(p) && p !== this.pk);
         if (added.length) this.systemMessage('g:' + gid, `${this.nameOf(from)} added ${added.map((p) => this.nameOf(p)).join(', ')}`, rumor.created_at * 1000);
-        if (c.n && existing.name && c.n !== existing.name) this.systemMessage('g:' + gid, `${this.nameOf(from)} renamed the group to “${g.name}”`, rumor.created_at * 1000);
+        if (newer && c.n && existing.name && c.n !== existing.name && from !== this.pk) this.systemMessage('g:' + gid, `${this.nameOf(from)} renamed the group to “${g.name}”`, rumor.created_at * 1000);
       }
       const q = this.pendingGroup[gid]; delete this.pendingGroup[gid];
       if (q) for (const r of q) this.handleRumor(r);
@@ -282,7 +294,7 @@ export class App extends EventTarget {
     } else if (c.op === 'leave') {
       if (!existing || !existing.members.includes(from)) return;
       existing.members = existing.members.filter((p) => p !== from);
-      existing.ts = Date.now();
+      (existing.left ||= {})[from] = rumor.created_at * 1000;
       if (from === this.pk) { delete this.state.groups[gid]; delete this.state.chats['g:' + gid]; }
       else {
         if (existing.admin === from && existing.members.length) existing.admin = existing.members[0];
@@ -486,7 +498,7 @@ export class App extends EventTarget {
     const friends = Object.entries(this.state.friends).filter(([, f]) => f.status === 'friend');
     for (const [pk] of friends) this.sendControl(pk, { t: 'profile', name: p.name, av: p.avatar });
     if (!friends.length) this.syncToSelf({ t: 'profile', name: p.name, av: p.avatar });
-    if (p.username) this.publishDirectory(true);
+    if (p.username && this.discoverable !== false) this.publishDirectory(true);
   }
   setName(name) {
     this.state.profile.name = name.trim().slice(0, 40);
@@ -502,6 +514,7 @@ export class App extends EventTarget {
 
   // Optional public pointer username -> identity so friends can add you by username.
   publishDirectory(on) {
+    this.discoverable = !!on;
     const u = this.state.profile.username; if (!u) return;
     const ev = directoryEvent(this.sk, u, on ? this.state.profile.name : '', !on);
     this.transport.publish(ev).catch((e) => console.warn('directory publish failed', e.message));
@@ -509,8 +522,10 @@ export class App extends EventTarget {
   lookupUsername(u) { return this.transport.lookup(u); }
 
   /* ---------- calls ---------- */
-  logCall(entry) {
+  logCall(entry, fromSync = false) {
+    if (this.state.calls.some((c) => c.id === entry.id)) return;
     this.state.calls.unshift(entry);
+    this.state.calls.sort((a, b) => b.ts - a.ts);
     if (this.state.calls.length > 200) this.state.calls.length = 200;
     const chat = this.store.chat(entry.peer);
     const id = 'call:' + entry.id;
@@ -518,5 +533,6 @@ export class App extends EventTarget {
       this.insertMessage(chat, { id, kind: 'call', from: entry.dir === 'out' ? this.pk : entry.peer, ts: entry.ts, video: entry.video, dur: entry.dur, missed: entry.missed, reason: entry.reason, dir: entry.dir });
     }
     this.store.save();
+    if (!fromSync) this.syncToSelf({ t: 'calllog', e: entry });
   }
 }

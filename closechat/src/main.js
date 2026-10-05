@@ -87,7 +87,7 @@ function previewOf(m) {
   if (!m) return '';
   if (m.kind === 'image') return '📷 Photo';
   if (m.kind === 'sticker') return '💟 Sticker';
-  if (m.kind === 'call') return `${m.video ? '📹' : '📞'} ${m.missed ? 'Missed ' : ''}${m.video ? 'Video' : 'Voice'} call${m.dur ? ' · ' + fmtDur(m.dur) : ''}`;
+  if (m.kind === 'call') return `${m.video ? '📹' : '📞'} ${m.reason === 'declined' ? 'Declined ' : m.missed ? 'Missed ' : ''}${m.video ? 'Video' : 'Voice'} call${m.dur ? ' · ' + fmtDur(m.dur) : ''}`;
   if (m.kind === 'game') return `🎮 ${m.text}`;
   if (m.kind === 'system') return m.text;
   return m.text;
@@ -193,7 +193,8 @@ async function startApp(sk, newName, username) {
   renderAll();
   app.start().then(() => {
     if (newName) app.syncToSelf({ t: 'profile', name: newName, u: store.state.profile.username });
-    if (settings.get().discoverable && store.state.profile.username) app.publishDirectory(true);
+    app.discoverable = !!settings.get().discoverable;
+    if (app.discoverable && store.state.profile.username) app.publishDirectory(true);
   }).catch((e) => toast('Relay connection failed: ' + e.message, 'error'));
   if (s.notifications && 'Notification' in window && Notification.permission === 'default') {
     setTimeout(() => Notification.requestPermission().catch(() => {}), 1500);
@@ -381,7 +382,7 @@ function renderSettings() {
     else if (act === 'remove') { app.setAvatar(''); toast('Photo removed'); }
   };
   el.querySelector('#s-name').parentElement.onclick = async () => { const v = await promptSheet('Your name', p.name, 'Name shown to friends'); if (v) app.setName(v); };
-  $('s-code').onclick = openAddFriend;
+  $('s-code').onclick = () => openAddFriend('me');
   el.querySelectorAll('.theme-opt').forEach((b) => { b.onclick = () => { settings.set({ theme: b.dataset.theme }); applyTheme(); renderSettings(); }; });
   el.querySelectorAll('.swatch').forEach((b) => { b.onclick = () => { settings.set({ accent: b.dataset.accent }); applyTheme(); renderSettings(); }; });
   el.querySelectorAll('.switch').forEach((b) => {
@@ -802,6 +803,7 @@ function showMembers(gid) {
 let scanStream = null, scanRaf = null;
 function stopScanner() { if (scanStream) { scanStream.getTracks().forEach((t) => t.stop()); scanStream = null; } cancelAnimationFrame(scanRaf); }
 function openAddFriend(tab = 'me') {
+  if (typeof tab !== 'string') tab = 'me';
   const code = friendCode(app.pk);
   const link = inviteLink();
   const qr = qrcode(0, 'M'); qr.addData('closechat:' + code); qr.make();
@@ -943,7 +945,7 @@ function openGame(id) {
 $('game-hide').onclick = () => { openGameId = null; $('game').classList.add('hidden'); };
 $('game-quit').onclick = async () => {
   const s = games.get(openGameId); if (!s) return;
-  if (s.status === 'done' || await confirmSheet('Leave game?', 'The game ends for everyone.', 'Leave')) { if (s.status !== 'done') games.quit(openGameId); openGameId = null; $('game').classList.add('hidden'); }
+  if (s.status === 'done' || await confirmSheet('Leave game?', 'The game ends for everyone.', 'Leave')) { if (s.status !== 'done') games.quit(s.id); if (openGameId === s.id) openGameId = null; $('game').classList.add('hidden'); }
 };
 let autoMoveTimer = null;
 function renderGame() {

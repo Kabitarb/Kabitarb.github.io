@@ -204,6 +204,7 @@ body.chat-open #chat { display: flex; }
 
 /* ---------- Call ---------- */
 .overlay { position: fixed; inset: 0; z-index: 50; }
+#modal, #viewer { z-index: 80; }
 #call { background: #000; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: calc(40px + var(--safe-top)) 20px calc(30px + var(--safe-bottom)); }
 #remote-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #000; }
 #local-video { position: absolute; top: calc(16px + var(--safe-top)); right: 16px; width: 110px; height: 150px; object-fit: cover; border-radius: 14px; background: #111; border: 2px solid rgba(255,255,255,.3); z-index: 2; transform: scaleX(-1); }
@@ -257,6 +258,7 @@ body.chat-open #chat { display: flex; }
 #call.watching .call-info { flex-direction: row; gap: 8px; } #call.watching .call-info .avatar { display: none; } #call.watching .call-info h2 { font-size: 16px; }
 #call.watching #local-video { width: 72px; height: 96px; }
 #call.watching .call-controls { gap: 14px; } #call.watching .round { width: 48px; height: 48px; }
+@media (max-width: 480px) { .call-controls { gap: 12px; flex-wrap: wrap; justify-content: center; max-width: 100%; } .round { width: 56px; height: 56px; } .round svg { width: 24px; height: 24px; } }
 #call.watching .panel { max-height: 58dvh; }
 
 /* ---------- Modal / sheet ---------- */
