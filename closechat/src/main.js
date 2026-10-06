@@ -5,7 +5,7 @@ import { Transport, DEFAULT_RELAYS } from './relay.js';
 import { Store, settings, session } from './store.js';
 import { App, isGroupId, gidOf } from './app.js';
 import { CallManager, Tones } from './rtc.js';
-import { PACKS, stickerIds, stickerSvg } from './stickers.js';
+import { PACKS, stickerIds, stickerSvg, animIds, animOf, animHtml } from './stickers.js';
 import { GameManager, GAMES, renderTTT, renderLudo } from './games.js';
 import { WatchManager, parseMedia, MEDIA_RE } from './watch.js';
 
@@ -86,7 +86,7 @@ function linkify(text) {
 function previewOf(m) {
   if (!m) return '';
   if (m.kind === 'image') return '📷 Photo';
-  if (m.kind === 'sticker') return '💟 Sticker';
+  if (m.kind === 'sticker') { const a = animOf(m.sticker); return a ? a.e + ' Animated emoji' : '💟 Sticker'; }
   if (m.kind === 'call') return `${m.video ? '📹' : '📞'} ${m.reason === 'declined' ? 'Declined ' : m.missed ? 'Missed ' : ''}${m.video ? 'Video' : 'Voice'} call${m.dur ? ' · ' + fmtDur(m.dur) : ''}`;
   if (m.kind === 'game') return `🎮 ${m.text}`;
   if (m.kind === 'system') return m.text;
@@ -381,7 +381,8 @@ function renderSettings() {
   const p = app.state.profile;
   el.innerHTML = `
     <div class="profile">${avatarHtml(app.pk)}
-      <div style="flex:1;min-width:0"><div class="name" id="s-name">${esc(p.name)}</div><div class="sub">${p.username ? '@' + esc(p.username) + ' · ' : ''}Tap photo or name to change</div></div></div>
+      <div style="flex:1;min-width:0"><div class="name" id="s-name">${esc(p.name)}</div><div class="sub">${p.username ? '@' + esc(p.username) : 'Tap name to change'}</div>
+        <div class="photo-actions"><button class="btn primary" id="s-photo">${p.avatar ? 'Change photo' : 'Add photo'}</button><button class="btn ghost" id="s-avatar">Choose avatar</button></div></div></div>
     <h4>Friends</h4>
     <div class="card"><div class="srow clickable" id="s-code"><span>My code, QR &amp; invite link</span><span class="muted">›</span></div>
       <div class="srow"><div><div>Findable by username</div><div class="tiny muted">Lets friends add you by typing @${esc(p.username || 'username')}. Publishes only your username and name.</div></div><button class="switch ${s.discoverable ? 'on' : ''}" data-set="discoverable"></button></div></div>
@@ -408,12 +409,10 @@ function renderSettings() {
       <div class="srow clickable" id="s-wipe"><span class="danger">Delete all data on this device</span></div>
     </div>
     <p class="tiny muted" style="margin-top:16px">Chatly v2.1 · No servers, no phone number. Your password is your key — there is no way to reset it.</p>`;
-  el.querySelector('.profile .avatar').onclick = async () => {
-    const act = await menuSheet([{ id: 'pick', label: 'Choose photo' }, ...(p.avatar ? [{ id: 'remove', label: 'Remove photo', danger: true }] : [])]);
-    if (act === 'pick') $('avatar-input').click();
-    else if (act === 'remove') { app.setAvatar(''); toast('Photo removed'); }
-  };
-  el.querySelector('#s-name').parentElement.onclick = async () => { const v = await promptSheet('Your name', p.name, 'Name shown to friends'); if (v) app.setName(v); };
+  el.querySelector('.profile .avatar').onclick = () => openAvatarPicker();
+  $('s-photo').onclick = () => openAvatarPicker();
+  $('s-avatar').onclick = () => openAvatarPicker(true);
+  $('s-name').onclick = async () => { const v = await promptSheet('Your name', p.name, 'Name shown to friends'); if (v) app.setName(v); };
   $('s-code').onclick = () => openAddFriend('me');
   el.querySelectorAll('.theme-opt').forEach((b) => { b.onclick = () => { settings.set({ theme: b.dataset.theme }); applyTheme(); renderSettings(); }; });
   el.querySelectorAll('.swatch').forEach((b) => { b.onclick = () => { settings.set({ accent: b.dataset.accent }); applyTheme(); renderSettings(); }; });
@@ -440,8 +439,42 @@ function renderSettings() {
 $('avatar-input').onchange = async () => {
   const file = $('avatar-input').files[0]; $('avatar-input').value = '';
   if (!file) return;
-  try { app.setAvatar(await squareAvatar(file)); toast('Profile photo updated'); } catch { toast('Could not read that image', 'error'); }
+  try { app.setAvatar(await squareAvatar(file)); hideModal(); toast('Profile photo updated'); } catch { toast('Could not read that image', 'error'); }
 };
+// Preloaded avatars: an emoji on a gradient disc, rasterised locally so they
+// travel like any other profile photo (small JPEG data URL).
+const PRESET_AVATARS = [['🦊', '#f97316'], ['🐼', '#64748b'], ['🐨', '#8b5cf6'], ['🦁', '#f59e0b'], ['🐸', '#22c55e'], ['🐙', '#ec4899'],
+  ['🦄', '#a855f7'], ['🐯', '#ea580c'], ['🐵', '#92400e'], ['🐧', '#0ea5e9'], ['🦋', '#06b6d4'], ['🐶', '#d97706'],
+  ['🐱', '#6366f1'], ['🌸', '#f472b6'], ['🌙', '#1e3a8a'], ['⚡', '#eab308'], ['🔥', '#dc2626'], ['🍀', '#16a34a'],
+  ['🎧', '#334155'], ['🎮', '#7c3aed'], ['⚽', '#059669'], ['🚀', '#2563eb'], ['🍩', '#db2777'], ['🤖', '#475569']];
+const presetCache = new Map();
+function presetAvatar(i, size = 128) {
+  const key = i + ':' + size;
+  if (presetCache.has(key)) return presetCache.get(key);
+  const [emoji, color] = PRESET_AVATARS[i];
+  const c = document.createElement('canvas'); c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const g = ctx.createLinearGradient(0, 0, size, size); g.addColorStop(0, color); g.addColorStop(1, '#0b1016');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
+  ctx.fillStyle = color; ctx.globalAlpha = .55; ctx.fillRect(0, 0, size, size); ctx.globalAlpha = 1;
+  ctx.font = `${Math.round(size * .58)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(emoji, size / 2, size / 2 + size * .04);
+  let out = c.toDataURL('image/jpeg', .9);
+  if (out.length > 9000) out = c.toDataURL('image/jpeg', .7);
+  presetCache.set(key, out);
+  return out;
+}
+function openAvatarPicker(presetsFirst = false) {
+  const p = app.state.profile;
+  showModal(`<h3>Profile photo</h3>
+    <div class="row"><label for="avatar-input" class="btn primary" style="flex:1">${p.avatar ? 'Upload a new photo' : 'Upload photo'}</label>${p.avatar ? '<button class="btn ghost" id="av-remove">Remove</button>' : ''}</div>
+    <p class="muted tiny" style="margin:12px 0 0">Or pick a ready-made avatar</p>
+    <div class="avatar-grid" id="av-grid">${PRESET_AVATARS.map((_, i) => `<button type="button" data-i="${i}"><img src="${presetAvatar(i, 96)}" alt=""></button>`).join('')}</div>`);
+  if (presetsFirst) setTimeout(() => $('av-grid').scrollIntoView({ block: 'nearest' }), 0);
+  $('av-grid').querySelectorAll('button').forEach((b) => { b.onclick = () => { app.setAvatar(presetAvatar(+b.dataset.i)); hideModal(); toast('Profile photo updated'); }; });
+  const rm = $('av-remove'); if (rm) rm.onclick = () => { app.setAvatar(''); hideModal(); toast('Photo removed'); };
+}
 // Centre-crop to a small square JPEG so it fits in friend-request/profile messages.
 async function squareAvatar(file) {
   const img = await loadImage(file);
@@ -565,7 +598,7 @@ function renderChat(scrollToEnd = false) {
       const emojiOnly = m.kind === 'text' && m.text.length <= 8 && EMOJI_RE.test(m.text);
       let body;
       if (m.kind === 'image') body = `<img src="${m.img}" alt="Photo" data-full="1">`;
-      else if (m.kind === 'sticker') body = stickerSvg(m.sticker) || '<span class="muted">Sticker</span>';
+      else if (m.kind === 'sticker') body = animHtml(m.sticker) || stickerSvg(m.sticker) || '<span class="muted">Sticker</span>';
       else { body = linkify(m.text); const mm = m.text.match(MEDIA_RE); if (mm) body += mediaCard(mm[0], out); }
       let quote = '';
       if (m.re) {
@@ -581,7 +614,7 @@ function renderChat(scrollToEnd = false) {
         else tick = `<span class="tick ${m.status === 'read' ? 'read' : ''}">${m.status === 'sent' || group ? '✓' : '✓✓'}</span>`;
       }
       const sender = group && !out && !cont ? `<div class="sender" style="color:${colorOf(m.from)}">${esc(app.nameOf(m.from))}</div>` : '';
-      html += `<div class="msg ${out ? 'out' : 'in'} ${emojiOnly ? 'emoji-only' : ''} ${m.kind === 'sticker' ? 'sticker-msg' : ''} ${cont ? 'cont' : ''} ${isNew(m) ? 'anim' : ''}" data-id="${m.id}">${sender}<div class="bubble">${quote}${body}</div><div class="meta">${fmtTime(m.ts)} ${tick}</div><button class="act" data-reply="${m.id}" title="Reply">${REPLY_SVG}</button></div>`;
+      html += `<div class="msg ${out ? 'out' : 'in'} ${emojiOnly ? 'emoji-only' : ''} ${m.kind === 'sticker' ? (animOf(m.sticker) ? 'aemoji-msg' : 'sticker-msg') : ''} ${cont ? 'cont' : ''} ${isNew(m) ? 'anim' : ''}" data-id="${m.id}">${sender}<div class="bubble">${quote}${body}</div><div class="meta">${fmtTime(m.ts)} ${tick}</div><button class="act" data-reply="${m.id}" title="Reply">${REPLY_SVG}</button></div>`;
       prev = m;
     }
     box.innerHTML = html;
@@ -740,7 +773,7 @@ async function compressImage(file) {
 const EMOJIS = '😀 😂 🤣 😊 😍 🥰 😘 😎 🤩 🥳 😅 😉 🙃 😇 🤔 🤨 😏 😴 🤤 😭 😤 😡 🤯 🥺 😬 🙄 😳 🤗 🤭 🤫 👍 👎 👌 ✌️ 🤞 🤙 👏 🙌 🙏 💪 ❤️ 🧡 💛 💚 💙 💜 🖤 💔 💯 🔥 ✨ 🎉 🎂 🍕 ☕ 🍻 ⚽ 🎮 🎵 🚀 🌙 ☀️ 🌈 🐶 🐱 🦄 👀 💀 🫶 🤝 👋'.split(' ');
 let pickerTab = 'emoji';
 function renderPicker() {
-  const tabs = [{ id: 'emoji', name: 'Emoji' }, ...PACKS.map((p) => ({ id: p.id, name: p.name }))];
+  const tabs = [{ id: 'emoji', name: 'Emoji' }, { id: 'anim', name: 'Animated' }, ...PACKS.map((p) => ({ id: p.id, name: p.name }))];
   $('picker-tabs').innerHTML = tabs.map((t) => `<button class="${pickerTab === t.id ? 'active' : ''}" data-p="${t.id}">${esc(t.name)}</button>`).join('');
   $('picker-tabs').querySelectorAll('button').forEach((b) => { b.onclick = () => { pickerTab = b.dataset.p; renderPicker(); }; });
   const body = $('picker-body');
@@ -748,6 +781,10 @@ function renderPicker() {
     body.className = 'picker-body emoji';
     body.innerHTML = EMOJIS.map((e) => `<button type="button">${e}</button>`).join('');
     body.querySelectorAll('button').forEach((b) => { b.onclick = () => { input.value += b.textContent; autosize(); input.focus(); }; });
+  } else if (pickerTab === 'anim') {
+    body.className = 'picker-body anim';
+    body.innerHTML = animIds().map((id) => `<button type="button" data-s="${id}" title="Send animated emoji">${animHtml(id)}</button>`).join('');
+    body.querySelectorAll('button').forEach((b) => { b.onclick = () => sendSticker(b.dataset.s); });
   } else {
     body.className = 'picker-body stickers';
     body.innerHTML = stickerIds(pickerTab).map((id) => `<button type="button" data-s="${id}">${stickerSvg(id, 84)}</button>`).join('');

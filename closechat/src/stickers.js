@@ -103,3 +103,23 @@ export function stickerSvg(id, size = W) {
   return `<svg viewBox="0 0 ${W} ${W}" width="${size}" height="${size}" class="sticker">${body}</svg>`;
 }
 export function isSticker(id) { return !!ALL[id]; }
+
+// Animated emoji: a plain emoji glyph plus a CSS animation. Sent as sticker id
+// `anim/<key>`; the glyph is included in the id-less fallback preview.
+export const ANIM = [
+  ['lol', '😂', 'bounce'], ['love', '😍', 'beat'], ['kiss', '😘', 'pulse'], ['party', '🥳', 'wiggle'],
+  ['cool', '😎', 'slide'], ['think', '🤔', 'tilt'], ['cry', '😭', 'shake'], ['angry', '😡', 'shake'],
+  ['mind', '🤯', 'pop'], ['wow', '😮', 'pop'], ['sleep', '😴', 'float'], ['heart', '❤️', 'beat'],
+  ['hearts', '💕', 'float'], ['fire', '🔥', 'flicker'], ['hundred', '💯', 'pop'], ['clap', '👏', 'clap'],
+  ['thumb', '👍', 'bounce'], ['wave', '👋', 'wave'], ['pray', '🙏', 'pulse'], ['tada', '🎉', 'wiggle'],
+  ['rocket', '🚀', 'rocket'], ['eyes', '👀', 'look'], ['skull', '💀', 'shake'], ['ghost', '👻', 'float'],
+  ['dance', '💃', 'wiggle'], ['poop', '💩', 'bounce'], ['star', '⭐', 'spin'], ['cake', '🎂', 'tilt'],
+  ['beer', '🍻', 'tilt'], ['ok', '👌', 'pop'], ['laugh', '🤣', 'spin'], ['sob', '🥺', 'pulse'],
+];
+const ANIM_BY_ID = Object.fromEntries(ANIM.map(([k, e, a]) => ['anim/' + k, { e, a }]));
+export function animIds() { return Object.keys(ANIM_BY_ID); }
+export function animOf(id) { return ANIM_BY_ID[id] || null; }
+export function animHtml(id, cls = '') {
+  const x = ANIM_BY_ID[id];
+  return x ? `<span class="aemoji a-${x.a} ${cls}">${x.e}</span>` : '';
+}
