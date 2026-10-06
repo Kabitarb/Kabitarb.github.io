@@ -45,6 +45,7 @@ export function emptyState() {
     games: {},          // gameId -> serialized game session
     lastSync: 0,        // newest wrap created_at we have processed
     seenRumors: [],
+    mediaParts: {},     // vid -> { n, parts: { idx: chunk } } while a video is still arriving
   };
 }
 
@@ -55,6 +56,7 @@ export class Store {
     this.state = emptyState();
     this._timer = null;
     this.listeners = new Set();
+    this.blobs = {};
   }
   async load() {
     try {
@@ -72,7 +74,15 @@ export class Store {
     clearTimeout(this._timer);
     try { await kvSet(this.key, await this.cipher.encrypt(this.state)); } catch (e) { console.error('store save failed', e); }
   }
-  async wipe() { await kvDel(this.key); }
+  async wipe() { await kvDel(this.key); for (const id of Object.keys(this.blobs)) await kvDel(this.blobKey(id)).catch(() => {}); }
+  // Large media (videos) live outside the state blob, one encrypted record each.
+  blobKey(id) { return 'blob:' + this.key.slice(6, 22) + ':' + id; }
+  async putBlob(id, data) { this.blobs[id] = data; try { await kvSet(this.blobKey(id), await this.cipher.encrypt(data)); } catch (e) { console.error('blob save failed', e); } }
+  async getBlob(id) {
+    if (this.blobs[id]) return this.blobs[id];
+    try { const buf = await kvGet(this.blobKey(id)); if (buf) return (this.blobs[id] = await this.cipher.decrypt(buf)); } catch {}
+    return null;
+  }
   onChange(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
 
   chat(pk) {

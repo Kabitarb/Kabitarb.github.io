@@ -15,6 +15,8 @@ export const EPHEMERAL_WRAP_KIND = 21059; // not stored (typing, call signaling)
 export const KIND_TEXT = 14;
 export const KIND_IMAGE = 15;
 export const KIND_STICKER = 16;
+export const KIND_VIDEO = 17;        // video message header (JSON meta, poster)
+export const KIND_CHUNK = 18;        // one piece of a chunked media payload
 export const KIND_CONTROL = 30;
 export const DIRECTORY_KIND = 30078; // public username -> identity pointer (opt-in)
 
@@ -126,4 +128,18 @@ export function directoryEvent(sk, username, name, remove = false) {
     tags: [['d', directoryTag(username)]],
     created_at: now(),
   }, sk);
+}
+
+// Encrypted account backup (friends, groups, profile) as a replaceable event
+// only this identity can decrypt. Lets a fresh device or a re-login rebuild the
+// friend list even after the relays have expired the original handshakes.
+export function backupTag(pk) { return 'closechat:backup:' + pk.slice(0, 16); }
+export function backupEvent(sk, obj) {
+  const pk = pubkeyOf(sk);
+  return finalizeEvent({ kind: DIRECTORY_KIND, content: encryptTo(sk, pk, JSON.stringify(obj)), tags: [['d', backupTag(pk)]], created_at: now() }, sk);
+}
+export function openBackup(sk, ev) {
+  const pk = pubkeyOf(sk);
+  if (ev.pubkey !== pk || !verifyEvent(ev)) throw new Error('bad backup');
+  return JSON.parse(decryptFrom(sk, pk, ev.content));
 }

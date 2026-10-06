@@ -84,6 +84,14 @@ export class Transport {
     return [...byPk.values()].sort((a, b) => a.created_at - b.created_at);
   }
 
+  // Newest encrypted account backup published by this identity (or null).
+  async fetchBackup(pk, tag) {
+    const evs = await this.pool.querySync(this.relays, { kinds: [DIRECTORY_KIND], authors: [pk], '#d': [tag] }, { maxWait: 7000 });
+    let best = null;
+    for (const ev of evs) if (ev.pubkey === pk && verifyEvent(ev) && (!best || ev.created_at > best.created_at)) best = ev;
+    return best;
+  }
+
   close() {
     if (this.sub) this.sub.close();
     clearInterval(this._statusTimer);
