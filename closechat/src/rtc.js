@@ -24,14 +24,14 @@ export class CallManager extends EventTarget {
     this.pc = null; this.local = null; this.remote = null;
     this.pendingIce = []; this.iceQueue = []; this.iceTimer = null;
     this.startedAt = 0; this.pendingOffer = null; this.muted = false; this.camOff = false;
-    this.facing = 'user';
+    this.facing = 'user'; this.sharing = false; this.remoteVideo = false; this.camTrack = null;
     clearTimeout(this.ringTimer); clearTimeout(this.connectTimer);
   }
 
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
   setState(s) { this.state = s; this.emit('state', this.info()); }
   info() {
-    return { state: this.state, peer: this.peer, video: this.video, dir: this.dir, startedAt: this.startedAt, muted: this.muted, camOff: this.camOff, local: this.local, remote: this.remote };
+    return { state: this.state, peer: this.peer, video: this.video, dir: this.dir, startedAt: this.startedAt, muted: this.muted, camOff: this.camOff, local: this.local, remote: this.remote, sharing: this.sharing, remoteVideo: this.remoteVideo };
   }
 
   signal(obj) { return this.app.sendControl(this.peer, Object.assign({ t: 'call', id: this.callId }, obj), true); }
@@ -56,6 +56,13 @@ export class CallManager extends EventTarget {
     pc.ontrack = (e) => {
       if (!this.remote) this.remote = new MediaStream();
       this.remote.addTrack(e.track);
+      if (e.track.kind === 'video') {
+        this.remoteVideo = true;
+        e.track.onmute = () => { this.remoteVideo = false; this.emit('state', this.info()); };
+        e.track.onunmute = () => { this.remoteVideo = true; this.emit('state', this.info()); };
+        e.track.onended = () => { this.remoteVideo = false; this.emit('state', this.info()); };
+        this.emit('state', this.info());
+      }
       this.emit('remote', this.remote);
     };
     pc.onconnectionstatechange = () => {
@@ -123,6 +130,19 @@ export class CallManager extends EventTarget {
       case 'ice':
         this.pendingIce.push(...(msg.cands || []));
         await this.drainIce();
+        break;
+      // mid-call renegotiation (screen share added to a voice call)
+      case 'renego':
+        if (this.pc && this.state === 'active') {
+          await this.pc.setRemoteDescription({ type: 'offer', sdp: msg.sdp });
+          const answer = await this.pc.createAnswer();
+          await this.pc.setLocalDescription(answer);
+          await this.signal({ a: 'reanswer', sdp: answer.sdp });
+          await this.drainIce();
+        }
+        break;
+      case 'reanswer':
+        if (this.pc && this.pc.signalingState === 'have-local-offer') { await this.pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp }); await this.drainIce(); }
         break;
       case 'reject': this.end('declined', false); break;
       case 'busy': this.end('busy', false); break;
@@ -196,6 +216,48 @@ export class CallManager extends EventTarget {
   toggleCamera() {
     this.camOff = !this.camOff;
     if (this.local) for (const t of this.local.getVideoTracks()) t.enabled = !this.camOff;
+    this.emit('state', this.info());
+  }
+  // Share the screen (desktop / Android browsers). In a video call the camera
+  // track is swapped; in a voice call a video track is added and the
+  // connection renegotiated. Stopping restores the camera or removes video.
+  async shareScreen() {
+    if (!this.pc || this.state !== 'active') return;
+    if (this.sharing) { await this.stopShare(); return; }
+    if (!navigator.mediaDevices.getDisplayMedia) { this.emit('error', 'Screen sharing is not available on this device'); return; }
+    let ds;
+    try { ds = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 15 }, audio: false }); } catch { return; }
+    const track = ds.getVideoTracks()[0];
+    track.onended = () => { if (this.sharing) this.stopShare(); };
+    const sender = this.pc.getSenders().find((x) => x.track && x.track.kind === 'video');
+    if (sender) {
+      this.camTrack = sender.track;
+      await sender.replaceTrack(track);
+      for (const t of this.local.getVideoTracks()) this.local.removeTrack(t);
+    } else {
+      this.pc.addTrack(track, this.local);
+      try {
+        const offer = await this.pc.createOffer();
+        await this.pc.setLocalDescription(offer);
+        await this.signal({ a: 'renego', sdp: offer.sdp });
+      } catch (e) { track.stop(); this.emit('error', 'Could not start screen share'); return; }
+    }
+    this.local.addTrack(track);
+    this.sharing = true;
+    this.emit('local', this.local);
+    this.emit('state', this.info());
+  }
+  async stopShare() {
+    if (!this.sharing) return;
+    this.sharing = false;
+    const shareTrack = this.local ? this.local.getVideoTracks()[0] : null;
+    const sender = this.pc && this.pc.getSenders().find((x) => x.track && x.track.kind === 'video');
+    if (shareTrack) { shareTrack.stop(); this.local.removeTrack(shareTrack); }
+    if (this.camTrack && sender) { await sender.replaceTrack(this.camTrack); this.local.addTrack(this.camTrack); this.camTrack = null; }
+    else if (sender) {
+      try { await sender.replaceTrack(null); } catch {}
+    }
+    this.emit('local', this.local);
     this.emit('state', this.info());
   }
   async switchCamera() {

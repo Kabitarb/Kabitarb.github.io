@@ -715,7 +715,7 @@ export class App extends EventTarget {
     for (const [pk, f] of Object.entries(this.state.friends)) if (['friend', 'pending', 'blocked', 'request'].includes(f.status)) friends[pk] = { n: f.name || '', s: f.status, t: f.since || 0 };
     for (const [gid, g] of Object.entries(this.state.groups)) if (g.members.includes(this.pk)) groups[gid] = { n: g.name, m: g.members, a: g.admin, t: g.since || 0, ts: g.ts || 0 };
     const p = this.state.profile;
-    return { v: 1, profile: { name: p.name || '', username: p.username || '' }, friends, groups };
+    return { v: 1, profile: { name: p.name || '', username: p.username || '', re: p.recoveryEmail || '' }, friends, groups };
   }
   checkBackup() {
     if (!this.ready) return;
@@ -757,7 +757,7 @@ export class App extends EventTarget {
       if (q) for (const rr of q) this.handleRumor(rr);
     }
     const p = this.state.profile;
-    if (b.profile) { if ((!p.name || p.name === 'Me') && b.profile.name) p.name = String(b.profile.name).slice(0, 40); if (!p.username && b.profile.username) p.username = b.profile.username; }
+    if (b.profile) { if ((!p.name || p.name === 'Me') && b.profile.name) p.name = String(b.profile.name).slice(0, 40); if (!p.username && b.profile.username) p.username = b.profile.username; if (!p.recoveryEmail && b.profile.re) p.recoveryEmail = String(b.profile.re).slice(0, 254); }
     this.lastBackupFp = JSON.stringify(this.backupSnapshot());
     if (added.length) {
       this.store.save();

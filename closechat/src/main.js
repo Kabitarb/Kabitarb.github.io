@@ -2,6 +2,8 @@ import qrcode from 'qrcode-generator';
 import jsQR from 'jsqr';
 import { deriveSecretKey, pubkeyOf, bytesToHex, hexToBytes, friendCode, parseFriendCode, localCipher, normalizeUsername } from './crypto.js';
 import { Transport, DEFAULT_RELAYS } from './relay.js';
+import { encodeRecoveryKey, decodeRecoveryKey } from './crypto.js';
+import { resolveLogin, setPassword, checkPassword, republishKeystore, RecoveryClient } from './account.js';
 import { Store, settings, session } from './store.js';
 import { App, isGroupId, gidOf } from './app.js';
 import { CallManager, Tones } from './rtc.js';
@@ -12,6 +14,11 @@ import { WatchManager, parseMedia, MEDIA_RE } from './watch.js';
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 let app = null, calls = null, games = null, watch = null, transport = null, store = null;
+// Owner: set this to your deployed recovery server (see server/README.md) so
+// every user gets "Forgot password by email"; users can override in Settings.
+const DEFAULT_RECOVERY_SERVER = '';
+let rc = new RecoveryClient(settings.get().recoveryServer || DEFAULT_RECOVERY_SERVER);
+let accountSk = null;      // identity key of the logged-in account (for signed recovery-server requests)
 const tones = new Tones();
 let currentTab = 'chats';
 let typingTimers = {};
@@ -141,11 +148,14 @@ function menuSheet(items) {
 $('show-signup').onclick = (e) => { e.preventDefault(); $('login-form').classList.add('hidden'); $('signup-form').classList.remove('hidden'); };
 $('show-login').onclick = (e) => { e.preventDefault(); $('signup-form').classList.add('hidden'); $('login-form').classList.remove('hidden'); };
 
-async function derive(username, password, progressEl) {
+function progressOf(progressEl) {
   progressEl.classList.remove('hidden');
   const bar = progressEl.firstElementChild; bar.style.width = '0%';
-  const sk = await deriveSecretKey(username, password, (p) => { bar.style.width = Math.round(p * 100) + '%'; });
-  bar.style.width = '100%';
+  return (p) => { bar.style.width = Math.round(p * 100) + '%'; };
+}
+async function derive(username, password, progressEl) {
+  const sk = await deriveSecretKey(username, password, progressOf(progressEl));
+  progressEl.firstElementChild.style.width = '100%';
   return sk;
 }
 
@@ -155,7 +165,7 @@ $('login-form').onsubmit = async (e) => {
   if (normalizeUsername(u).length < 3) { err.textContent = 'Enter your username.'; return; }
   const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Unlocking…';
   try {
-    const sk = await derive(u, p, $('login-progress'));
+    const { sk } = await resolveLogin(u, p, progressOf($('login-progress')), (t) => { btn.textContent = t; });
     await startApp(sk, null, u);
   } catch (ex) { err.textContent = ex.message; }
   btn.disabled = false; btn.textContent = 'Log In'; $('login-progress').classList.add('hidden');
@@ -177,6 +187,74 @@ $('signup-form').onsubmit = async (e) => {
   btn.disabled = false; btn.textContent = 'Create Account'; $('signup-progress').classList.add('hidden');
 };
 
+/* ---------------- forgot password ---------------- */
+let forgot = { mode: 'email', stage: 'start', sk: null };
+function showAuthForm(id) { ['login-form', 'signup-form', 'forgot-form'].forEach((f) => $(f).classList.toggle('hidden', f !== id)); }
+function resetForgot() {
+  forgot = { mode: 'email', stage: 'start', sk: null };
+  $('forgot-form').reset();
+  $('forgot-mode').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.m === 'email'));
+  $('forgot-email-step').classList.remove('hidden'); $('forgot-key-step').classList.add('hidden');
+  $('forgot-new').classList.add('hidden'); $('forgot-code-row').classList.add('hidden');
+  $('forgot-submit').textContent = 'Continue'; $('forgot-error').textContent = '';
+  $('forgot-email').placeholder = rc.enabled ? 'Recovery email' : 'Recovery email (no recovery server configured)';
+}
+$('show-forgot').onclick = (e) => { e.preventDefault(); resetForgot(); showAuthForm('forgot-form'); $('forgot-user').value = $('login-user').value; };
+$('forgot-back').onclick = (e) => { e.preventDefault(); showAuthForm('login-form'); };
+$('forgot-mode').querySelectorAll('button').forEach((b) => {
+  b.onclick = () => {
+    if (forgot.stage === 'newpass') return;
+    forgot.mode = b.dataset.m; forgot.stage = 'start';
+    $('forgot-mode').querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+    $('forgot-email-step').classList.toggle('hidden', forgot.mode !== 'email');
+    $('forgot-key-step').classList.toggle('hidden', forgot.mode !== 'key');
+    $('forgot-error').textContent = '';
+  };
+});
+$('forgot-send').onclick = async () => {
+  const u = $('forgot-user').value, email = $('forgot-email').value.trim(); const err = $('forgot-error'); err.textContent = '';
+  if (normalizeUsername(u).length < 3) { err.textContent = 'Enter your username.'; return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { err.textContent = 'Enter the recovery email you verified in Settings.'; return; }
+  if (!rc.enabled) { err.textContent = 'Email reset needs the recovery server (ask whoever hosts this app). You can still use your recovery key.'; return; }
+  const b = $('forgot-send'); b.disabled = true; b.textContent = 'Sending…';
+  try { await rc.recoverStart(u, email); $('forgot-code-row').classList.remove('hidden'); forgot.stage = 'code'; $('forgot-code').focus(); b.textContent = 'Resend code'; }
+  catch (ex) { err.textContent = ex.message; b.textContent = 'Send code'; }
+  b.disabled = false;
+};
+$('forgot-form').onsubmit = async (e) => {
+  e.preventDefault();
+  const u = $('forgot-user').value; const err = $('forgot-error'); err.textContent = '';
+  if (normalizeUsername(u).length < 3) { err.textContent = 'Enter your username.'; return; }
+  const btn = $('forgot-submit');
+  try {
+    if (forgot.stage === 'newpass') {
+      const p = $('forgot-pass').value, p2 = $('forgot-pass2').value;
+      if (p.length < 12) { err.textContent = 'Use at least 12 characters for your new password.'; return; }
+      if (p !== p2) { err.textContent = 'Passwords do not match.'; return; }
+      btn.disabled = true; btn.textContent = 'Saving new password…';
+      await setPassword(forgot.sk, u, p, progressOf($('forgot-progress')));
+      if (forgot.mode === 'email') { try { await rc.refreshEscrow(forgot.sk, u); } catch {} }
+      const sk = forgot.sk; resetForgot(); showAuthForm('login-form');
+      toast('Password changed. You are logged in.');
+      await startApp(sk, null, u);
+      return;
+    }
+    if (forgot.mode === 'key') {
+      forgot.sk = decodeRecoveryKey($('forgot-key').value);
+    } else {
+      if (forgot.stage !== 'code') { $('forgot-send').click(); return; }
+      const code = $('forgot-code').value.trim(); if (code.length !== 6) { err.textContent = 'Enter the 6-digit code from the email.'; return; }
+      btn.disabled = true; btn.textContent = 'Checking code…';
+      forgot.sk = await rc.recoverFinish(u, $('forgot-email').value.trim(), code);
+    }
+    forgot.stage = 'newpass';
+    $('forgot-email-step').classList.add('hidden'); $('forgot-key-step').classList.add('hidden'); $('forgot-mode').classList.add('hidden');
+    $('forgot-new').classList.remove('hidden'); $('forgot-pass').focus();
+    btn.textContent = 'Set new password';
+  } catch (ex) { err.textContent = ex.message; if (forgot.stage !== 'newpass') btn.textContent = 'Continue'; }
+  btn.disabled = false; $('forgot-progress').classList.add('hidden');
+};
+
 /* ---------------- app start ---------------- */
 async function startApp(sk, newName, username) {
   const pk = pubkeyOf(sk);
@@ -195,6 +273,7 @@ async function startApp(sk, newName, username) {
     c.title = `${n}/${total} relays connected`;
   });
   app = new App(sk, store, transport);
+  accountSk = sk;
   app.sharePresence = s.presence !== false;
   calls = new CallManager(app);
   games = new GameManager(app);
@@ -206,7 +285,8 @@ async function startApp(sk, newName, username) {
   app.start().then(() => {
     if (newName) app.syncToSelf({ t: 'profile', name: newName, u: store.state.profile.username });
     app.discoverable = !!settings.get().discoverable;
-    if (store.state.profile.username) app.publishDirectory(app.discoverable);
+    if (store.state.profile.username) { app.publishDirectory(app.discoverable); republishKeystore(transport, store.state.profile.username); }
+    checkRecoveryEmail();
   }).catch((e) => toast('Relay connection failed: ' + e.message, 'error'));
   if (s.notifications && 'Notification' in window && Notification.permission === 'default') {
     setTimeout(() => Notification.requestPermission().catch(() => {}), 1500);
@@ -273,6 +353,7 @@ let renderTimer = null;
 function scheduleRender() { if (renderTimer) return; renderTimer = requestAnimationFrame(() => { renderTimer = null; renderAll(); }); }
 
 function renderAll() {
+  renderEmailBanner();
   if (!app) return;
   setAvatar($('me-avatar'), app.pk);
   renderChatList(); renderFriends(); renderCalls(); renderRequests(); renderSettings();
@@ -431,6 +512,12 @@ function renderSettings() {
     <div class="card"><div class="srow clickable" id="s-code"><span>My code, QR &amp; invite link</span><span class="muted">›</span></div>
       <div class="srow"><div><div>Show when I'm online</div><div class="tiny muted">Close friends see “Online” and your last seen. Nobody else can.</div></div><button class="switch ${s.presence !== false ? 'on' : ''}" data-set="presence"></button></div>
       <div class="srow"><div><div>Findable by username</div><div class="tiny muted">Lets friends add you by typing @${esc(p.username || 'username')}. Publishes only your username and name.</div></div><button class="switch ${s.discoverable ? 'on' : ''}" data-set="discoverable"></button></div></div>
+    <h4>Account &amp; security</h4>
+    <div class="card">
+      <div class="srow clickable" id="s-email"><div><div>Recovery email</div><div class="tiny muted">${p.recoveryEmail ? esc(p.recoveryEmail) + ' · verified' : rc.enabled ? 'Not set — add one so you can reset a forgotten password' : 'Needs a recovery server (Network ↓)'}</div></div><span class="muted">${p.recoveryEmail ? '✓' : '›'}</span></div>
+      <div class="srow clickable" id="s-pass"><div><div>Change password</div><div class="tiny muted">Friends, history and username stay the same.</div></div><span class="muted">›</span></div>
+      <div class="srow clickable" id="s-rkey"><div><div>Recovery key</div><div class="tiny muted">Resets your password without email. Save it somewhere safe.</div></div><span class="muted">›</span></div>
+    </div>
     <h4>Appearance</h4>
     <div class="card">
       <div class="srow" style="flex-direction:column;align-items:stretch;gap:10px"><span>Theme</span><div class="theme-opts">
@@ -445,7 +532,8 @@ function renderSettings() {
       <div class="srow"><span>Vibration</span><button class="switch ${s.haptics ? 'on' : ''}" data-set="haptics"></button></div>
     </div>
     <h4>Network</h4>
-    <div class="card"><div class="srow" style="flex-direction:column;align-items:stretch;gap:8px"><span>Relays (one per line). Relays only ever see encrypted blobs.</span><textarea id="relay-text">${esc(relays)}</textarea><div class="row" style="justify-content:flex-end;gap:8px;display:flex"><button class="btn ghost small" id="relay-reset">Reset</button><button class="btn primary small" id="relay-save">Save & reconnect</button></div></div></div>
+    <div class="card"><div class="srow" style="flex-direction:column;align-items:stretch;gap:8px"><span>Relays (one per line). Relays only ever see encrypted blobs.</span><textarea id="relay-text">${esc(relays)}</textarea><div class="row" style="justify-content:flex-end;gap:8px;display:flex"><button class="btn ghost small" id="relay-reset">Reset</button><button class="btn primary small" id="relay-save">Save & reconnect</button></div></div>
+      <div class="srow" style="flex-direction:column;align-items:stretch;gap:8px"><span>Recovery server URL <span class="tiny muted">(optional, for email password reset — see server/README)</span></span><div class="row" style="display:flex;gap:8px"><input id="s-server" type="text" placeholder="https://…" value="${esc(s.recoveryServer || '')}" style="flex:1;min-width:0"><button class="btn primary small" id="s-server-save">Save</button></div></div></div>
     <h4>Security</h4>
     <div class="card">
       <div class="srow"><span>End-to-end encryption</span><span class="muted">Always on</span></div>
@@ -453,12 +541,21 @@ function renderSettings() {
       <div class="srow clickable" id="s-logout"><span>Log out</span><span class="muted">Keeps encrypted history</span></div>
       <div class="srow clickable" id="s-wipe"><span class="danger">Delete all data on this device</span></div>
     </div>
-    <p class="tiny muted" style="margin-top:16px">Chatly v4 · No servers, no phone number. Your password is your key — there is no way to reset it.</p>`;
+    <p class="tiny muted" style="margin-top:16px">Chatly v5 · Your password unlocks your encryption key. Reset it with your recovery email or recovery key.</p>`;
   el.querySelector('.profile .avatar').onclick = () => openAvatarPicker();
   $('s-photo').onclick = () => openAvatarPicker();
   $('s-avatar').onclick = () => openAvatarPicker(true);
   $('s-name').onclick = async () => { const v = await promptSheet('Your name', p.name, 'Name shown to friends'); if (v) app.setName(v); };
   $('s-code').onclick = () => openAddFriend('me');
+  $('s-email').onclick = () => openRecoveryEmail();
+  $('s-pass').onclick = () => openChangePassword();
+  $('s-rkey').onclick = () => openRecoveryKey();
+  $('s-server-save').onclick = () => {
+    const v = $('s-server').value.trim().replace(/\/+$/, '');
+    if (v && !/^https?:\/\//.test(v)) { toast('Enter a full URL starting with https://', 'error'); return; }
+    settings.set({ recoveryServer: v || null }); rc = new RecoveryClient(v || DEFAULT_RECOVERY_SERVER);
+    toast(v ? 'Recovery server saved' : 'Recovery server cleared'); renderSettings(); renderEmailBanner(); if (v) checkRecoveryEmail();
+  };
   el.querySelectorAll('.theme-opt').forEach((b) => { b.onclick = () => { settings.set({ theme: b.dataset.theme }); applyTheme(); renderSettings(); }; });
   el.querySelectorAll('.swatch').forEach((b) => { b.onclick = () => { settings.set({ accent: b.dataset.accent }); applyTheme(); renderSettings(); }; });
   el.querySelectorAll('.switch').forEach((b) => {
@@ -482,10 +579,109 @@ function renderSettings() {
     if (await confirmSheet('Delete all local data?', 'Chats cached on this device will be erased. Messages still on relays (last ~days) can be re-downloaded by logging in.', 'Delete')) { await store.wipe(); session.clear(); location.reload(); }
   };
 }
+/* ---------------- account & recovery ---------------- */
+function passwordSheet(title, fields, submitLabel) {
+  // fields: [{ id, placeholder }] -> resolves to values or null
+  return new Promise((res) => {
+    showModal(`<h3>${esc(title)}</h3><form id="pw-form" class="stack">${fields.map((f) => `<input type="password" id="${f.id}" placeholder="${esc(f.placeholder)}" autocomplete="${f.auto || 'new-password'}" required>`).join('')}
+      <div class="auth-error" id="pw-err"></div><div class="progress hidden" id="pw-progress"><div></div></div>
+      <div class="row" style="justify-content:flex-end;margin:0"><button type="button" class="btn ghost" id="pw-cancel">Cancel</button><button type="submit" class="btn primary" id="pw-ok">${esc(submitLabel)}</button></div></form>`);
+    $('pw-cancel').onclick = () => { hideModal(); res(null); };
+    $('pw-form').onsubmit = (e) => { e.preventDefault(); res(fields.map((f) => $(f.id).value)); };
+    setTimeout(() => $(fields[0].id).focus(), 50);
+  });
+}
+async function openChangePassword() {
+  const u = app.state.profile.username;
+  if (!u) { toast('Set your username first (log out and in again)', 'error'); return; }
+  const vals = await passwordSheet('Change password', [{ id: 'pw-cur', placeholder: 'Current password', auto: 'current-password' }, { id: 'pw-new', placeholder: 'New password (12+ characters)' }, { id: 'pw-new2', placeholder: 'Confirm new password' }], 'Change');
+  if (!vals) return;
+  const [cur, nw, nw2] = vals; const err = $('pw-err'); const ok = $('pw-ok');
+  if (nw.length < 12) { err.textContent = 'Use at least 12 characters.'; return openChangePasswordRetry(); }
+  if (nw !== nw2) { err.textContent = 'New passwords do not match.'; return openChangePasswordRetry(); }
+  ok.disabled = true; ok.textContent = 'Checking…';
+  try {
+    if (!(await checkPassword(accountSk, u, cur, progressOf($('pw-progress'))))) throw new Error('Current password is wrong.');
+    ok.textContent = 'Saving…';
+    await setPassword(accountSk, u, nw, progressOf($('pw-progress')), transport);
+    hideModal(); toast('Password changed');
+  } catch (e) { err.textContent = e.message; ok.disabled = false; ok.textContent = 'Change'; $('pw-progress').classList.add('hidden'); openChangePasswordRetry(); }
+}
+// keep the sheet open for another attempt
+function openChangePasswordRetry() {
+  const f = $('pw-form'); if (!f) return;
+  f.onsubmit = (e) => { e.preventDefault(); hideModal(); openChangePassword(); };
+}
+function openRecoveryKey() {
+  const key = encodeRecoveryKey(accountSk);
+  showModal(`<h3>Recovery key</h3><p class="muted tiny" style="margin:0 0 10px">Anyone with this key can log in to your account. Store it in a password manager or on paper — never send it in a chat.</p>
+    <div class="rkey" id="rkey-text">${key}</div>
+    <div class="row" style="justify-content:flex-end"><button class="btn ghost" id="rk-close">Close</button><button class="btn primary" id="rk-copy">Copy</button></div>`);
+  $('rk-close').onclick = hideModal;
+  $('rk-copy').onclick = async () => { try { await navigator.clipboard.writeText(key); toast('Recovery key copied'); } catch { toast('Select the key and copy it manually'); } };
+}
+async function openRecoveryEmail() {
+  const p = app.state.profile; const u = p.username;
+  if (!rc.enabled) {
+    showModal(`<h3>Recovery email</h3><p class="muted">Password reset by email needs the small Chatly recovery server. Whoever hosts this app sets it up once (closechat/server/README.md); the address goes into Settings → Network → Recovery server URL.</p><p class="muted">Until then, save your <b>recovery key</b> — it resets your password without any server.</p><div class="row" style="justify-content:flex-end"><button class="btn primary" id="re-ok">OK</button></div>`);
+    $('re-ok').onclick = hideModal; return;
+  }
+  if (p.recoveryEmail) {
+    const m = await menuSheet([{ id: 'change', label: 'Change recovery email' }, { id: 'remove', label: 'Remove recovery email', danger: true }]);
+    if (m === 'remove') {
+      if (await confirmSheet('Remove recovery email?', 'You will not be able to reset a forgotten password by email anymore.', 'Remove')) {
+        try { await rc.removeEmail(accountSk, u); p.recoveryEmail = ''; store.save(); toast('Recovery email removed'); renderSettings(); renderEmailBanner(); } catch (e) { toast(e.message, 'error'); }
+      }
+      return;
+    }
+    if (m !== 'change') return;
+  }
+  const email = (await promptSheet('Recovery email', p.recoveryEmail || '', 'you@example.com') || '').trim();
+  if (!email) return;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast('That does not look like an email address', 'error'); return; }
+  try { await rc.startEmail(accountSk, u, email); } catch (e) { toast(e.message, 'error'); return; }
+  for (let tries = 0; tries < 3; tries++) {
+    const code = (await promptSheet('Enter the 6-digit code', '', `Sent to ${email} — check spam too`) || '').trim();
+    if (!code) return;
+    try {
+      await rc.verifyEmail(accountSk, u, code);
+      p.recoveryEmail = email; store.save(); app.publishBackup().catch(() => {});
+      toast('Recovery email verified'); renderSettings(); renderEmailBanner(); return;
+    } catch (e) { toast(e.message, 'error'); if (/expired|attempts/.test(e.message)) return; }
+  }
+}
+function renderEmailBanner() {
+  const el = $('email-banner'); if (!el || !app) return;
+  const snooze = settings.get().emailSnooze || 0;
+  el.classList.toggle('hidden', !(rc.enabled && !app.state.profile.recoveryEmail && snooze < Date.now()));
+}
+$('eb-add').onclick = () => openRecoveryEmail();
+$('eb-later').onclick = () => { settings.set({ emailSnooze: Date.now() + 7 * 864e5 }); renderEmailBanner(); toast('We’ll remind you in a week'); };
+// On login: learn about an email verified on another device, and heal the
+// server's escrow copy if it was lost (e.g. redeploy without a disk).
+async function checkRecoveryEmail() {
+  renderEmailBanner();
+  if (!rc.enabled || !app.state.profile.username) return;
+  try {
+    const st = await rc.status(accountSk, app.state.profile.username);
+    const p = app.state.profile;
+    if (st.registered) {
+      if (p.recoveryEmail !== st.email) { p.recoveryEmail = st.email; store.save(); }
+      if (!st.hasEscrow) await rc.refreshEscrow(accountSk, p.username);
+    } else if (p.recoveryEmail) {
+      p.recoveryEmail = ''; store.save(); toast('Your recovery email needs to be verified again', 'error');
+    }
+  } catch {}
+  renderEmailBanner(); if (currentTab === 'settings') renderSettings();
+}
+
 $('avatar-input').onchange = async () => {
   const file = $('avatar-input').files[0]; $('avatar-input').value = '';
   if (!file) return;
-  try { app.setAvatar(await squareAvatar(file)); hideModal(); toast('Profile photo updated'); } catch { toast('Could not read that image', 'error'); }
+  let img; try { img = await loadImage(file); } catch { toast('Could not read that image', 'error'); return; }
+  const out = await cropSheet(img);
+  URL.revokeObjectURL(img.src);
+  if (out) { app.setAvatar(out); hideModal(); toast('Profile photo updated'); }
 };
 // Preloaded avatars: an emoji on a gradient disc, rasterised locally so they
 // travel like any other profile photo (small JPEG data URL).
@@ -494,15 +690,18 @@ const PRESET_AVATARS = [['🦊', '#f97316'], ['🐼', '#64748b'], ['🐨', '#8b5
   ['🐱', '#6366f1'], ['🌸', '#f472b6'], ['🌙', '#1e3a8a'], ['⚡', '#eab308'], ['🔥', '#dc2626'], ['🍀', '#16a34a'],
   ['🎧', '#334155'], ['🎮', '#7c3aed'], ['⚽', '#059669'], ['🚀', '#2563eb'], ['🍩', '#db2777'], ['🤖', '#475569']];
 const presetCache = new Map();
+function shade(hex, amt) { const n = parseInt(hex.slice(1), 16); const f = (c) => Math.max(0, Math.min(255, Math.round(c + (amt < 0 ? c * amt : (255 - c) * amt)))); return `rgb(${f(n >> 16)},${f((n >> 8) & 255)},${f(n & 255)})`; }
 function presetAvatar(i, size = 128) {
   const key = i + ':' + size;
   if (presetCache.has(key)) return presetCache.get(key);
   const [emoji, color] = PRESET_AVATARS[i];
   const c = document.createElement('canvas'); c.width = c.height = size;
   const ctx = c.getContext('2d');
-  const g = ctx.createLinearGradient(0, 0, size, size); g.addColorStop(0, color); g.addColorStop(1, '#0b1016');
+  // full-bleed disc: light tint top-left to a deeper shade of the same colour
+  const g = ctx.createLinearGradient(0, 0, size, size); g.addColorStop(0, color); g.addColorStop(1, shade(color, -0.45));
   ctx.fillStyle = g; ctx.fillRect(0, 0, size, size);
-  ctx.fillStyle = color; ctx.globalAlpha = .55; ctx.fillRect(0, 0, size, size); ctx.globalAlpha = 1;
+  const hl = ctx.createRadialGradient(size * .3, size * .25, 0, size * .3, size * .25, size * .8); hl.addColorStop(0, 'rgba(255,255,255,.28)'); hl.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = hl; ctx.fillRect(0, 0, size, size);
   ctx.font = `${Math.round(size * .58)}px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillText(emoji, size / 2, size / 2 + size * .04);
@@ -520,6 +719,53 @@ function openAvatarPicker(presetsFirst = false) {
   if (presetsFirst) setTimeout(() => $('av-grid').scrollIntoView({ block: 'nearest' }), 0);
   $('av-grid').querySelectorAll('button').forEach((b) => { b.onclick = () => { app.setAvatar(presetAvatar(+b.dataset.i)); hideModal(); toast('Profile photo updated'); }; });
   const rm = $('av-remove'); if (rm) rm.onclick = () => { app.setAvatar(''); hideModal(); toast('Photo removed'); };
+}
+// Drag/zoom crop before saving; resolves to a small square JPEG (<= 9 KB) or null.
+function cropSheet(img) {
+  return new Promise((res) => {
+    const S = 280;
+    showModal(`<h3>Crop photo</h3><div class="crop-wrap"><canvas id="crop-cv" width="${S}" height="${S}"></canvas></div>
+      <div class="row"><span class="tiny muted">Zoom</span><input type="range" id="crop-zoom" min="1" max="3" step="0.01" value="1"></div>
+      <p class="tiny muted" style="margin:0 0 10px;text-align:center">Drag to reposition · pinch or scroll to zoom</p>
+      <div class="row" style="justify-content:flex-end"><button class="btn ghost" id="crop-cancel">Cancel</button><button class="btn primary" id="crop-ok">Use photo</button></div>`);
+    const cv = $('crop-cv'), ctx = cv.getContext('2d');
+    const base = S / Math.min(img.width, img.height);
+    let zoom = 1, ox = 0, oy = 0;
+    const dims = () => ({ w: img.width * base * zoom, h: img.height * base * zoom });
+    const clamp = () => { const { w, h } = dims(); const mx = (w - S) / 2, my = (h - S) / 2; ox = Math.max(-mx, Math.min(mx, ox)); oy = Math.max(-my, Math.min(my, oy)); };
+    const draw = (c = ctx, size = S) => { const k = size / S; const { w, h } = dims(); c.clearRect(0, 0, size, size); c.drawImage(img, (S / 2 - w / 2 + ox) * k, (S / 2 - h / 2 + oy) * k, w * k, h * k); };
+    const setZoom = (z, cx = 0, cy = 0) => { const old = zoom; zoom = Math.max(1, Math.min(3, z)); const r = zoom / old; ox = cx + (ox - cx) * r; oy = cy + (oy - cy) * r; clamp(); $('crop-zoom').value = zoom; draw(); };
+    draw();
+    const ptrs = new Map(); let drag = null, pinch = null;
+    const local = (e) => { const r = cv.getBoundingClientRect(); const k = S / r.width; return { x: (e.clientX - r.left) * k - S / 2, y: (e.clientY - r.top) * k - S / 2 }; };
+    cv.onpointerdown = (e) => {
+      cv.setPointerCapture(e.pointerId); ptrs.set(e.pointerId, local(e));
+      if (ptrs.size === 1) drag = { x: e.clientX, y: e.clientY, ox, oy };
+      else if (ptrs.size === 2) { const [a, b] = [...ptrs.values()]; pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), z: zoom }; drag = null; }
+    };
+    cv.onpointermove = (e) => {
+      if (!ptrs.has(e.pointerId)) return; ptrs.set(e.pointerId, local(e));
+      if (pinch && ptrs.size === 2) { const [a, b] = [...ptrs.values()]; setZoom(pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, (a.x + b.x) / 2, (a.y + b.y) / 2); return; }
+      if (!drag) return;
+      const r = cv.getBoundingClientRect(); const k = S / r.width;
+      ox = drag.ox + (e.clientX - drag.x) * k; oy = drag.oy + (e.clientY - drag.y) * k; clamp(); draw();
+    };
+    cv.onpointerup = cv.onpointercancel = (e) => { ptrs.delete(e.pointerId); drag = null; pinch = null; if (ptrs.size === 1) { const [p] = [...ptrs.values()]; drag = { x: p.x, y: p.y, ox, oy }; drag = null; } };
+    cv.onwheel = (e) => { e.preventDefault(); const p = local(e); setZoom(zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08), p.x, p.y); };
+    $('crop-zoom').oninput = (e) => setZoom(+e.target.value);
+    $('crop-cancel').onclick = () => { hideModal(); res(null); };
+    $('crop-ok').onclick = () => {
+      let q = 0.85, out = '';
+      for (let size = 160; size >= 64; size -= 32) {
+        const c = document.createElement('canvas'); c.width = c.height = size;
+        draw(c.getContext('2d'), size);
+        out = c.toDataURL('image/jpeg', q);
+        if (out.length <= 9000) break;
+        q = 0.72;
+      }
+      res(out);
+    };
+  });
 }
 // Centre-crop to a small square JPEG so it fits in friend-request/profile messages.
 async function squareAvatar(file) {
@@ -982,11 +1228,12 @@ $('chat-menu-btn').onclick = async () => {
 };
 
 /* together menu */
-$('together-btn').onclick = async () => {
-  const id = app.openChat; if (!id) return;
+$('together-btn').onclick = () => openTogether(app.openChat);
+async function openTogether(id, gamesOnly = false) {
+  if (!id) return;
   const active = games.forChat(id);
   const items = [
-    { id: 'watch', label: '📺 Watch a reel together' },
+    ...(gamesOnly ? [] : [{ id: 'watch', label: '📺 Watch a reel together' }]),
     ...active.map((s) => ({ id: 'g:' + s.id, label: `${GAMES[s.type].icon} ${s.status === 'lobby' ? 'Join' : 'Open'} ${GAMES[s.type].name} (${s.players.length} player${s.players.length === 1 ? '' : 's'})` })),
     { id: 'ttt', label: '⭕ New Tic-Tac-Toe' }, { id: 'ludo', label: '🎲 New Ludo' },
   ];
@@ -995,7 +1242,7 @@ $('together-btn').onclick = async () => {
   if (act === 'watch') { const url = await promptSheet('Watch together', '', 'Paste an Instagram reel / YouTube / TikTok link', 'Everyone in this chat gets the same clip at the same time. Both of you need internet; the clip plays in the platform’s own player.'); if (url) startWatch(id, url); }
   else if (act.startsWith('g:')) openGame(act.slice(2));
   else { try { const s = games.invite(id, act); openGame(s.id); } catch (e) { toast(e.message, 'error'); } }
-};
+}
 
 /* ---------------- groups ---------------- */
 function pickFriends(title, exclude, onDone, withName = false) {
@@ -1161,26 +1408,44 @@ function wireGames() {
     scheduleRender();
   });
 }
+let gameMini = false;
 function openGame(id) {
   const s = games.get(id); if (!s) return;
-  openGameId = id;
+  openGameId = id; gameMini = false;
   if (s.status === 'lobby' && !s.players.includes(app.pk)) { try { games.join(id); } catch (e) { toast(e.message, 'error'); } }
+  if (calls && calls.state !== 'idle' && !callMini) setCallMini(true);
+  if (s.chatId !== app.openChat) openChat(s.chatId);
   $('game').classList.remove('hidden');
   renderGame();
 }
-$('game-hide').onclick = () => { openGameId = null; $('game').classList.add('hidden'); };
-$('game-quit').onclick = async () => {
+function closeGamePanel() { openGameId = null; gameMini = false; $('game').classList.add('hidden'); $('game').classList.remove('full', 'mini', 'turn'); }
+function setGameMini(on) { gameMini = on; renderGame(); haptic(); }
+$('game-hide').onclick = () => setGameMini(true);
+$('game-mini-bar').onclick = (e) => { if (!e.target.closest('#game-mini-leave')) setGameMini(false); };
+async function leaveGame() {
   const s = games.get(openGameId); if (!s) return;
-  if (s.status === 'done' || await confirmSheet('Leave game?', 'The game ends for everyone.', 'Leave')) { if (s.status !== 'done') games.quit(s.id); if (openGameId === s.id) openGameId = null; $('game').classList.add('hidden'); }
-};
+  if (s.status === 'done' || await confirmSheet('Leave game?', 'The game ends for everyone.', 'Leave')) { if (s.status !== 'done') games.quit(s.id); if (openGameId === s.id) closeGamePanel(); }
+}
+$('game-quit').onclick = leaveGame;
+$('game-mini-leave').onclick = (e) => { e.stopPropagation(); leaveGame(); };
 let autoMoveTimer = null;
 function renderGame() {
-  const s = games.get(openGameId); if (!s) { $('game').classList.add('hidden'); return; }
+  const s = games.get(openGameId); if (!s) { closeGamePanel(); return; }
   const G = GAMES[s.type];
+  const panel = $('game');
   $('game-title').textContent = `${G.icon} ${G.name} · ${app.nameOf(s.chatId)}`;
   $('game-quit').textContent = s.status === 'done' ? 'Close' : 'Leave';
   const body = $('game-body');
   const my = games.myIndex(s);
+  const myTurn = s.status === 'playing' && s.state && s.players[s.state.turn] === app.pk;
+  panel.classList.toggle('mini', gameMini);
+  panel.classList.toggle('full', !gameMini && s.status !== 'lobby');
+  panel.classList.toggle('turn', gameMini && myTurn);
+  $('game-mini-icon').textContent = G.icon;
+  $('game-mini-title').textContent = `${G.name} · ${app.nameOf(s.chatId)}`;
+  $('game-mini-sub').textContent = s.status === 'lobby' ? 'Waiting in lobby · tap to return' : s.status === 'done' ? 'Game over · tap to return' : myTurn ? 'Your turn! Tap to play' : `${esc(app.nameOf(s.players[s.state.turn]))}'s turn · tap to return`;
+  $('game-mini-leave').textContent = s.status === 'done' ? 'Close' : 'Leave';
+  if (gameMini) return;
   if (s.status === 'lobby') {
     const host = s.host === app.pk;
     body.innerHTML = `<div class="lobby"><div class="game-status">${host ? (s.players.length < G.min ? 'Waiting for friends to join…' : 'Ready when you are') : `Waiting for ${esc(app.nameOf(s.host))} to start…`}</div>
@@ -1238,6 +1503,8 @@ $('accept-btn').onclick = () => { tones.ensure(); calls.accept(); };
 $('mute-btn').onclick = () => calls.toggleMute();
 $('cam-btn').onclick = () => calls.toggleCamera();
 $('flip-btn').onclick = () => calls.switchCamera();
+$('share-btn').onclick = () => calls.shareScreen();
+$('call-game-btn').onclick = (e) => { e.stopPropagation(); const peer = calls.peer; if (!peer) return; setCallMini(true); openTogether(peer, true); };
 let speakerOn = false;
 function setSpeaker(on) {
   speakerOn = on;
@@ -1302,14 +1569,19 @@ function renderCall(info) {
   $('call-min-btn').classList.toggle('hidden', incoming);
   $('incoming-controls').classList.toggle('hidden', !incoming);
   $('call-controls').classList.toggle('hidden', incoming);
-  $('local-video').classList.toggle('hidden', !info.video || !info.local);
+  $('local-video').classList.toggle('hidden', !(info.video || info.sharing) || !info.local);
   $('cam-btn').classList.toggle('hidden', !info.video);
-  $('flip-btn').classList.toggle('hidden', !info.video);
+  $('flip-btn').classList.toggle('hidden', !info.video || info.sharing);
+  const canShare = info.state === 'active' && !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+  $('share-btn').classList.toggle('hidden', !canShare); $('share-btn').classList.toggle('on', !!info.sharing);
+  $('share-btn').title = info.sharing ? 'Stop sharing screen' : 'Share screen';
+  $('call-game-btn').classList.toggle('hidden', info.state !== 'active'); $('call-game-btn').classList.toggle('on', !!openGameId);
+  ov.classList.toggle('sharing', !!info.sharing);
   $('call-watch-btn').classList.toggle('hidden', info.state !== 'active');
   $('call-watch-btn').classList.toggle('on', !!watch.session);
   $('mute-btn').classList.toggle('on', info.muted);
   $('cam-btn').classList.toggle('on', info.camOff);
-  ov.classList.toggle('has-video', info.video && info.state === 'active' && !!info.remote);
+  ov.classList.toggle('has-video', (info.video || info.remoteVideo || info.sharing) && info.state === 'active' && !!info.remote);
   const status = $('call-status');
   clearInterval(callTimer);
   $('speaker-btn').classList.toggle('hidden', !nativeAudio || info.state !== 'active');

@@ -143,3 +143,88 @@ export function openBackup(sk, ev) {
   if (ev.pubkey !== pk || !verifyEvent(ev)) throw new Error('bad backup');
   return JSON.parse(decryptFrom(sk, pk, ev.content));
 }
+
+/* ---------------- keystore (change password) ----------------
+ * The identity key stays fixed for the life of the account. A keystore is the
+ * identity key wrapped with a key derived from the *current* password, stored
+ * as a replaceable event signed by the identity, plus a local copy. Changing
+ * the password only re-wraps; friends, history and username are untouched.
+ * Only a key derived from the right password can open it. */
+export function keystoreTag(username) {
+  return 'closechat:ks:' + bytesToHex(sha256(utf8ToBytes('closechat:ks:' + normalizeUsername(username)))).slice(0, 32);
+}
+export function wrapSecret(kek, sk) { return encryptTo(kek, pubkeyOf(kek), bytesToHex(sk)); }
+export function unwrapSecret(kek, wrapped) {
+  const hex = decryptFrom(kek, pubkeyOf(kek), wrapped);
+  if (!/^[0-9a-f]{64}$/.test(hex)) throw new Error('bad keystore');
+  return hexToBytes(hex);
+}
+export function keystoreEvent(sk, kek, username) {
+  return finalizeEvent({
+    kind: DIRECTORY_KIND,
+    content: JSON.stringify({ v: 1, w: wrapSecret(kek, sk) }),
+    tags: [['d', keystoreTag(username)]],
+    created_at: now(),
+  }, sk);
+}
+// Returns the identity key if this keystore event was locked with `kek`.
+export function openKeystore(kek, ev) {
+  if (!verifyEvent(ev)) return null;
+  try {
+    const c = JSON.parse(ev.content);
+    const sk = unwrapSecret(kek, c.w);
+    return pubkeyOf(sk) === ev.pubkey ? sk : null;
+  } catch { return null; }
+}
+
+/* ---------------- recovery key ----------------
+ * 56-character human-typable encoding of the identity key (base32, with a
+ * checksum byte), shown once in Settings. Works with no server at all. */
+const B32 = 'ABCDEFGHJKMNPQRSTVWXYZ0123456789';
+export function encodeRecoveryKey(sk) {
+  const bytes = new Uint8Array(35);
+  bytes.set(sk);
+  const chk = sha256(sk);
+  bytes[32] = chk[0]; bytes[33] = chk[1]; bytes[34] = chk[2];
+  let bits = 0, val = 0, out = '';
+  for (const b of bytes) {
+    val = (val << 8) | b; bits += 8;
+    while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  return out.match(/.{1,4}/g).join('-');
+}
+export function decodeRecoveryKey(str) {
+  const s = String(str || '').toUpperCase().replace(/[^A-Z0-9]/g, '').replace(/O/g, '0').replace(/[IL]/g, '1').replace(/U/g, 'V');
+  if (s.length !== 56) throw new Error('A recovery key has 56 characters');
+  let bits = 0, val = 0; const bytes = [];
+  for (const ch of s) {
+    const v = B32.indexOf(ch); if (v < 0) throw new Error('Invalid character in recovery key');
+    val = (val << 5) | v; bits += 5;
+    if (bits >= 8) { bytes.push((val >>> (bits - 8)) & 255); bits -= 8; }
+  }
+  const sk = new Uint8Array(bytes.slice(0, 32));
+  const chk = sha256(sk);
+  if (bytes[32] !== chk[0] || bytes[33] !== chk[1] || bytes[34] !== chk[2]) throw new Error('Recovery key has a typo — check it and try again');
+  return sk;
+}
+
+/* ---------------- email recovery escrow ----------------
+ * For users who opt in to email recovery: the identity key is wrapped with a
+ * fresh random key R; the recovery server keeps the wrapped blob and R and only
+ * hands them back after an emailed code is entered. */
+export function makeEscrow(sk) {
+  const r = generateSecretKey();
+  return { blob: wrapSecret(r, sk), r: bytesToHex(r) };
+}
+export function openEscrow(escrow) { return unwrapSecret(hexToBytes(escrow.r), escrow.blob); }
+export function accountTag(username) { return bytesToHex(sha256(utf8ToBytes('closechat:acct:' + normalizeUsername(username)))); }
+// Signed request envelope for the recovery server (NIP-98 style): proves the
+// caller holds the identity key without sending it.
+export function signedRequest(sk, path, body) {
+  return finalizeEvent({
+    kind: 27235,
+    content: '',
+    tags: [['u', path], ['method', 'POST'], ['payload', bytesToHex(sha256(utf8ToBytes(JSON.stringify(body))))]],
+    created_at: now(),
+  }, sk);
+}
