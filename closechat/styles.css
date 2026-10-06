@@ -584,3 +584,9 @@ button.avatar, .avatar { padding: 0; border: 0; box-sizing: border-box; }
 @keyframes pulse-bar { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.18); } }
 #share-btn.on, #call-game-btn.on { background: var(--accent); color: #fff; }
 #call.sharing #local-video { object-fit: contain; background: #000; }
+
+/* no stale frame once the remote stops sending video */
+#call:not(.has-video) #remote-video { display: none; }
+/* voice-call mini bar sits above a full-screen game: make room for the game header */
+body.call-mini-voice #game.full { padding-top: calc(66px + var(--safe-top, 0px)); }
+body.call-mini-voice #game.mini { top: calc(62px + var(--safe-top, 0px)); }

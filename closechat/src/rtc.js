@@ -141,6 +141,7 @@ export class CallManager extends EventTarget {
           await this.drainIce();
         }
         break;
+      case 'share': this.remoteVideo = !!msg.on; this.emit('state', this.info()); break;
       case 'reanswer':
         if (this.pc && this.pc.signalingState === 'have-local-offer') { await this.pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp }); await this.drainIce(); }
         break;
@@ -244,12 +245,14 @@ export class CallManager extends EventTarget {
     }
     this.local.addTrack(track);
     this.sharing = true;
+    this.signal({ a: 'share', on: true }).catch(() => {});
     this.emit('local', this.local);
     this.emit('state', this.info());
   }
   async stopShare() {
     if (!this.sharing) return;
     this.sharing = false;
+    if (!this.camTrack) this.signal({ a: 'share', on: false }).catch(() => {});
     const shareTrack = this.local ? this.local.getVideoTracks()[0] : null;
     const sender = this.pc && this.pc.getSenders().find((x) => x.track && x.track.kind === 'video');
     if (shareTrack) { shareTrack.stop(); this.local.removeTrack(shareTrack); }

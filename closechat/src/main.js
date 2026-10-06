@@ -594,23 +594,28 @@ function passwordSheet(title, fields, submitLabel) {
 async function openChangePassword() {
   const u = app.state.profile.username;
   if (!u) { toast('Set your username first (log out and in again)', 'error'); return; }
-  const vals = await passwordSheet('Change password', [{ id: 'pw-cur', placeholder: 'Current password', auto: 'current-password' }, { id: 'pw-new', placeholder: 'New password (12+ characters)' }, { id: 'pw-new2', placeholder: 'Confirm new password' }], 'Change');
+  const fields = [{ id: 'pw-cur', placeholder: 'Current password', auto: 'current-password' }, { id: 'pw-new', placeholder: 'New password (12+ characters)' }, { id: 'pw-new2', placeholder: 'Confirm new password' }];
+  const vals = await passwordSheet('Change password', fields, 'Change');
   if (!vals) return;
-  const [cur, nw, nw2] = vals; const err = $('pw-err'); const ok = $('pw-ok');
-  if (nw.length < 12) { err.textContent = 'Use at least 12 characters.'; return openChangePasswordRetry(); }
-  if (nw !== nw2) { err.textContent = 'New passwords do not match.'; return openChangePasswordRetry(); }
-  ok.disabled = true; ok.textContent = 'Checking…';
-  try {
-    if (!(await checkPassword(accountSk, u, cur, progressOf($('pw-progress'))))) throw new Error('Current password is wrong.');
-    ok.textContent = 'Saving…';
-    await setPassword(accountSk, u, nw, progressOf($('pw-progress')), transport);
-    hideModal(); toast('Password changed');
-  } catch (e) { err.textContent = e.message; ok.disabled = false; ok.textContent = 'Change'; $('pw-progress').classList.add('hidden'); openChangePasswordRetry(); }
-}
-// keep the sheet open for another attempt
-function openChangePasswordRetry() {
-  const f = $('pw-form'); if (!f) return;
-  f.onsubmit = (e) => { e.preventDefault(); hideModal(); openChangePassword(); };
+  // the sheet stays open on errors; each submit re-reads the fields
+  const attempt = async (cur, nw, nw2) => {
+    const err = $('pw-err'); const ok = $('pw-ok'); if (!err || !ok) return;
+    err.textContent = '';
+    if (nw.length < 12) { err.textContent = 'Use at least 12 characters.'; return; }
+    if (nw !== nw2) { err.textContent = 'New passwords do not match.'; return; }
+    ok.disabled = true; ok.textContent = 'Checking…';
+    try {
+      if (!(await checkPassword(accountSk, u, cur, progressOf($('pw-progress'))))) throw new Error('Current password is wrong.');
+      ok.textContent = 'Saving…';
+      await setPassword(accountSk, u, nw, progressOf($('pw-progress')), transport);
+      hideModal(); toast('Password changed');
+    } catch (e) {
+      err.textContent = e.message; ok.disabled = false; ok.textContent = 'Change'; $('pw-progress').classList.add('hidden');
+      $('pw-cur').value = ''; $('pw-cur').focus();
+    }
+  };
+  $('pw-form').onsubmit = (e) => { e.preventDefault(); attempt(...fields.map((f) => $(f.id).value)); };
+  await attempt(...vals);
 }
 function openRecoveryKey() {
   const key = encodeRecoveryKey(accountSk);
@@ -1483,6 +1488,7 @@ function setCallMini(on) {
   ov.classList.toggle('mini', on);
   ov.classList.toggle('voice', on && !(lastCallInfo && lastCallInfo.video));
   document.body.classList.toggle('call-mini', on);
+  document.body.classList.toggle('call-mini-voice', on && !(lastCallInfo && lastCallInfo.video));
   if (on) haptic(6);
 }
 $('call-min-btn').onclick = (e) => { e.stopPropagation(); setCallMini(true); };
