@@ -53,13 +53,15 @@ function avatarInner(id, name = '') {
   const known = app && (app.isFriend(id) || id === app.pk);
   return av ? `<img src="${av}" alt="">` : esc(initials(name && !known ? name : app ? app.nameOf(id) : '?'));
 }
+function isOnline(id) { return !!app && !isGroupId(id) && id !== app.pk && app.isOnline(id); }
 function avatarHtml(id, cls = '', name = '') {
   const group = isGroupId(id);
-  return `<div class="avatar ${cls} ${group ? 'group' : ''}" style="${group ? '' : 'background:' + colorOf(id)}">${avatarInner(id, name)}</div>`;
+  return `<div class="avatar ${cls} ${group ? 'group' : ''} ${isOnline(id) ? 'online' : ''}" style="${group ? '' : 'background:' + colorOf(id)}">${avatarInner(id, name)}</div>`;
 }
 function setAvatar(el, id) {
   const group = isGroupId(id);
   el.classList.toggle('group', group);
+  el.classList.toggle('online', isOnline(id));
   el.style.background = group ? '' : colorOf(id);
   el.innerHTML = avatarInner(id);
 }
@@ -78,6 +80,14 @@ function fmtListTime(ts) {
   if (now - d < 6 * 864e5) return d.toLocaleDateString([], { weekday: 'short' });
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
+function fmtClock(s) { s = Math.round(s); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; }
+function fmtAgo(ts) {
+  const d = Date.now() - ts;
+  if (d < 60000) return 'just now';
+  if (d < 3600000) return `${Math.floor(d / 60000)} min ago`;
+  if (d < 86400000) return `${Math.floor(d / 3600000)} h ago`;
+  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 function fmtDur(s) { const m = Math.floor(s / 60), r = s % 60; return m ? `${m}m ${r}s` : `${r}s`; }
 const EMOJI_RE = /^(?:\p{Extended_Pictographic}|\p{Emoji_Component}|\u200d|\ufe0f)+$/u;
 function linkify(text) {
@@ -86,6 +96,7 @@ function linkify(text) {
 function previewOf(m) {
   if (!m) return '';
   if (m.kind === 'image') return '📷 Photo';
+  if (m.kind === 'video') return '🎬 Video';
   if (m.kind === 'sticker') { const a = animOf(m.sticker); return a ? a.e + ' Animated emoji' : '💟 Sticker'; }
   if (m.kind === 'call') return `${m.video ? '📹' : '📞'} ${m.reason === 'declined' ? 'Declined ' : m.missed ? 'Missed ' : ''}${m.video ? 'Video' : 'Voice'} call${m.dur ? ' · ' + fmtDur(m.dur) : ''}`;
   if (m.kind === 'game') return `🎮 ${m.text}`;
@@ -184,6 +195,7 @@ async function startApp(sk, newName, username) {
     c.title = `${n}/${total} relays connected`;
   });
   app = new App(sk, store, transport);
+  app.sharePresence = s.presence !== false;
   calls = new CallManager(app);
   games = new GameManager(app);
   watch = new WatchManager(app);
@@ -204,6 +216,7 @@ async function startApp(sk, newName, username) {
 
 function logout() {
   session.clear();
+  if (app) app.stop();
   if (transport) transport.close();
   if (store) store.flush();
   location.reload();
@@ -211,12 +224,12 @@ function logout() {
 
 function offerAdd(pk, name) {
   if (pk === app.pk) { toast("That's your own invite link"); return; }
-  if (app.isFriend(pk)) { openChat(pk); return; }
+  if (app.isFriend(pk) || app.isPending(pk)) { openChat(pk); return; }
   showModal(`<h3>Add a close friend?</h3><div class="row">${avatarHtml(pk, '', name)}<div><div style="font-weight:700">${esc(name || 'Friend ' + pk.slice(0, 6))}</div><div class="tiny muted">${esc(friendCode(pk).slice(0, 20))}…</div></div></div>
     <p class="muted tiny">They sent you an invite link. Adding them lets you chat and call each other, end-to-end encrypted.</p>
     <div class="row" style="justify-content:flex-end"><button class="btn ghost" id="a-no">Not now</button><button class="btn primary" id="a-ok">Add friend</button></div>`);
   $('a-no').onclick = hideModal;
-  $('a-ok').onclick = () => { hideModal(); try { app.addFriend(pk); if (name) { app.state.friends[pk].name = name; store.save(); } toast('Friend request sent'); openChat(pk); } catch (e) { toast(e.message, 'error'); } };
+  $('a-ok').onclick = () => { hideModal(); try { const r = app.addFriend(pk); if (name && !app.state.friends[pk].name) { app.state.friends[pk].name = name; store.save(); } toast(r === 'accepted' ? 'You are now close friends' : 'Friend request sent'); openChat(pk); } catch (e) { toast(e.message, 'error'); } };
 }
 
 /* ---------------- events from protocol ---------------- */
@@ -237,7 +250,11 @@ function wireApp() {
     } else if (!atBottom()) { unseen++; updateJump(); }
   });
   app.addEventListener('request', (e) => { if (e.detail.fresh) toast(`New request from ${app.nameOf(e.detail.pk)}`); });
-  app.addEventListener('friend', (e) => { if (e.detail.accepted) toast(`${app.nameOf(e.detail.pk)} accepted your request`); });
+  app.addEventListener('friend', (e) => { if (e.detail.accepted) { toast(`${app.nameOf(e.detail.pk)} accepted your request`); haptic(); } });
+  app.addEventListener('presence', () => { scheduleRender(); });
+  app.addEventListener('restored', (e) => toast(`Restored ${e.detail.n} friend${e.detail.n === 1 ? '' : 's'} from your encrypted backup`));
+  app.addEventListener('media', () => { if (app.openChat) { renderedFor = null; renderChat(); } });
+  setInterval(() => { if (app && !document.hidden) { renderChatList(); updateTyping(); } }, 30000);
   app.addEventListener('typing', (e) => {
     const { pk, chatId, on } = e.detail;
     clearTimeout(typingTimers[chatId]);
@@ -246,7 +263,7 @@ function wireApp() {
     updateTyping(); renderChatList();
   });
   document.addEventListener('visibilitychange', () => {
-    app.visible = !document.hidden;
+    app.setVisible(!document.hidden);
     if (!document.hidden && app.openChat) app.markRead(app.openChat);
   });
 }
@@ -260,6 +277,7 @@ function renderAll() {
   setAvatar($('me-avatar'), app.pk);
   renderChatList(); renderFriends(); renderCalls(); renderRequests(); renderSettings();
   if (app.openChat) renderChat();
+  $('fab-new').classList.toggle('hidden', currentTab !== 'chats');
   const pending = Object.values(app.state.friends).filter((f) => f.status === 'request').length;
   const b = $('req-badge'); b.textContent = pending; b.classList.toggle('hidden', !pending);
   const totalUnread = Object.entries(app.state.chats).filter(([id]) => app.canChat(id)).reduce((a, [, c]) => a + c.unread, 0);
@@ -268,8 +286,9 @@ function renderAll() {
 
 function renderChatList() {
   const q = ($('chat-search').value || '').toLowerCase();
-  const friends = Object.entries(app.state.friends).filter(([, f]) => f.status === 'friend').map(([pk, f]) => ({ id: pk, since: f.since, chat: app.store.chat(pk) }));
+  const friends = Object.entries(app.state.friends).filter(([, f]) => f.status === 'friend' || f.status === 'pending').map(([pk, f]) => ({ id: pk, since: f.since, pending: f.status === 'pending', chat: app.store.chat(pk) }));
   const groups = Object.entries(app.state.groups).map(([gid, g]) => ({ id: 'g:' + gid, since: g.since, chat: app.store.chat('g:' + gid) }));
+  renderActiveRow();
   const items = [...friends, ...groups]
     .filter((x) => !q || app.nameOf(x.id).toLowerCase().includes(q))
     .sort((a, b) => (b.chat.lastTs || b.since || 0) - (a.chat.lastTs || a.since || 0));
@@ -278,19 +297,39 @@ function renderChatList() {
     el.innerHTML = `<div class="empty-list"><p>No close friends yet.</p><p class="tiny">Share your invite link or scan a friend's code to start.</p><button class="btn primary" id="empty-add">Add a friend</button></div>`;
     $('empty-add').onclick = openAddFriend; return;
   }
-  el.innerHTML = items.map(({ id, chat }) => {
+  el.innerHTML = items.map(({ id, chat, pending }) => {
     const last = chat.messages[chat.messages.length - 1];
     const plain = last && ['system', 'call', 'game'].includes(last.kind);
-    let preview = last ? ((plain ? '' : last.from === app.pk ? 'You: ' : isGroupId(id) && last.from ? app.nameOf(last.from) + ': ' : '') + previewOf(last)) : 'Say hi 👋';
+    let preview = last ? ((plain ? '' : last.from === app.pk ? 'You: ' : isGroupId(id) && last.from ? app.nameOf(last.from) + ': ' : '') + previewOf(last)) : pending ? 'Waiting for them to accept' : 'Say hi 👋';
     const t = typingState[id];
     if (t) preview = `<i>${isGroupId(id) ? esc(app.nameOf(t.pk)) + ' is ' : ''}typing…</i>`; else preview = esc(preview);
     return `<div class="item ${chat.unread ? 'unread-item' : ''} ${app.openChat === id ? 'active' : ''}" data-id="${id}">
       ${avatarHtml(id)}
-      <div class="body"><div class="top"><span class="name">${esc(app.nameOf(id))}</span><span class="time">${fmtListTime(chat.lastTs)}</span></div>
+      <div class="body"><div class="top"><span class="name">${esc(app.nameOf(id))}</span>${pending ? '<span class="pend">Request sent</span>' : `<span class="time">${fmtListTime(chat.lastTs)}</span>`}</div>
       <div class="preview"><span>${preview}</span>${chat.unread ? `<span class="unread">${chat.unread}</span>` : ''}</div></div></div>`;
   }).join('');
   el.querySelectorAll('.item').forEach((i) => { i.onclick = () => openChat(i.dataset.id); });
 }
+function renderActiveRow() {
+  const el = $('active-row');
+  const on = app.friendPks().filter((pk) => app.isOnline(pk)).sort((a, b) => app.nameOf(a).localeCompare(app.nameOf(b)));
+  el.classList.toggle('hidden', !on.length);
+  const key = on.join(',');
+  if (el.dataset.key === key) return;
+  el.dataset.key = key;
+  el.innerHTML = on.map((pk) => `<button data-id="${pk}" title="${esc(app.nameOf(pk))} is online">${avatarHtml(pk)}<span>${esc(app.nameOf(pk).split(' ')[0])}</span></button>`).join('');
+  el.querySelectorAll('button').forEach((b) => { b.onclick = () => openChat(b.dataset.id); });
+}
+function openNewMessage() {
+  const friends = app.friendPks().sort((a, b) => app.nameOf(a).localeCompare(app.nameOf(b)));
+  showModal(`<h3>New message</h3>
+    <div class="menu" style="margin-bottom:10px"><button id="nm-group">👥 New group</button><button id="nm-add">➕ Add a friend</button></div>
+    ${friends.length ? `<div class="pick-list">${friends.map((pk) => `<div class="row-item" data-pk="${pk}">${avatarHtml(pk)}<div class="name"><div>${esc(app.nameOf(pk))}</div><div class="sub">${app.isOnline(pk) ? 'Online' : app.lastSeen(pk) ? 'Last seen ' + fmtAgo(app.lastSeen(pk)) : 'Close friend'}</div></div></div>`).join('')}</div>` : '<p class="muted tiny">No close friends yet — add one to start chatting.</p>'}`);
+  $('nm-group').onclick = () => { hideModal(); openNewGroup(); };
+  $('nm-add').onclick = () => openAddFriend('me');
+  $('modal-body').querySelectorAll('[data-pk]').forEach((r) => { r.onclick = () => { hideModal(); openChat(r.dataset.pk); }; });
+}
+$('fab-new').onclick = () => { haptic(); openNewMessage(); };
 $('friend-search').oninput = () => renderFriends();
 $('chat-search').oninput = renderChatList;
 
@@ -349,17 +388,21 @@ function renderCalls() {
 function renderRequests() {
   const el = $('request-list');
   const reqs = Object.entries(app.state.friends).filter(([, f]) => f.status === 'request');
+  const sent = Object.entries(app.state.friends).filter(([, f]) => f.status === 'pending');
   const blocked = Object.entries(app.state.friends).filter(([, f]) => f.status === 'blocked');
   let html = '';
-  if (!reqs.length) html += `<div class="empty-list"><p>No pending requests.</p><p class="tiny">When someone who isn't a close friend messages you, it shows up here first.</p></div>`;
+  if (!reqs.length && !sent.length) html += `<div class="empty-list"><p>No pending requests.</p><p class="tiny">When someone who isn't a close friend messages you, it shows up here first.</p></div>`;
   html += reqs.map(([pk]) => {
     const chat = app.store.chat(pk); const last = chat.messages[chat.messages.length - 1];
     return `<div class="item" data-pk="${pk}">${avatarHtml(pk)}
       <div class="body"><div class="name">${esc(app.nameOf(pk))}</div><div class="preview"><span>${last ? esc(previewOf(last)) : 'Wants to be your close friend'}</span></div></div>
       <div class="actions"><button class="btn primary small" data-act="accept">Accept</button><button class="btn ghost small" data-act="block">Block</button></div></div>`;
   }).join('');
+  if (sent.length) {
+    html += `<h4 class="muted list-h4">Sent requests</h4>` + sent.map(([pk, f]) => `<div class="item" data-pk="${pk}">${avatarHtml(pk)}<div class="body"><div class="name">${esc(app.nameOf(pk))}</div><div class="preview"><span>Sent ${fmtAgo(f.since || Date.now())} · waiting for them to accept</span></div></div><div class="actions"><button class="btn ghost small" data-act="cancel">Cancel</button></div></div>`).join('');
+  }
   if (blocked.length) {
-    html += `<h4 class="muted" style="padding:14px 14px 4px;font-size:13px;text-transform:uppercase">Blocked</h4>` + blocked.map(([pk]) => `<div class="item" data-pk="${pk}">${avatarHtml(pk)}<div class="body"><div class="name">${esc(app.nameOf(pk))}</div></div><div class="actions"><button class="btn ghost small" data-act="unblock">Unblock</button></div></div>`).join('');
+    html += `<h4 class="muted list-h4">Blocked</h4>` + blocked.map(([pk]) => `<div class="item" data-pk="${pk}">${avatarHtml(pk)}<div class="body"><div class="name">${esc(app.nameOf(pk))}</div></div><div class="actions"><button class="btn ghost small" data-act="unblock">Unblock</button></div></div>`).join('');
   }
   el.innerHTML = html;
   el.querySelectorAll('.item').forEach((i) => {
@@ -369,6 +412,7 @@ function renderRequests() {
       if (act === 'accept') { app.acceptRequest(pk); toast('Added to close friends'); haptic(); }
       else if (act === 'block') app.block(pk);
       else if (act === 'unblock') app.unblock(pk);
+      else if (act === 'cancel') { if (app.openChat === pk) closeChat(); app.cancelRequest(pk); toast('Request cancelled'); }
       else openChat(pk);
     };
   });
@@ -385,6 +429,7 @@ function renderSettings() {
         <div class="photo-actions"><button class="btn primary" id="s-photo">${p.avatar ? 'Change photo' : 'Add photo'}</button><button class="btn ghost" id="s-avatar">Choose avatar</button></div></div></div>
     <h4>Friends</h4>
     <div class="card"><div class="srow clickable" id="s-code"><span>My code, QR &amp; invite link</span><span class="muted">›</span></div>
+      <div class="srow"><div><div>Show when I'm online</div><div class="tiny muted">Close friends see “Online” and your last seen. Nobody else can.</div></div><button class="switch ${s.presence !== false ? 'on' : ''}" data-set="presence"></button></div>
       <div class="srow"><div><div>Findable by username</div><div class="tiny muted">Lets friends add you by typing @${esc(p.username || 'username')}. Publishes only your username and name.</div></div><button class="switch ${s.discoverable ? 'on' : ''}" data-set="discoverable"></button></div></div>
     <h4>Appearance</h4>
     <div class="card">
@@ -408,7 +453,7 @@ function renderSettings() {
       <div class="srow clickable" id="s-logout"><span>Log out</span><span class="muted">Keeps encrypted history</span></div>
       <div class="srow clickable" id="s-wipe"><span class="danger">Delete all data on this device</span></div>
     </div>
-    <p class="tiny muted" style="margin-top:16px">Chatly v2.1 · No servers, no phone number. Your password is your key — there is no way to reset it.</p>`;
+    <p class="tiny muted" style="margin-top:16px">Chatly v4 · No servers, no phone number. Your password is your key — there is no way to reset it.</p>`;
   el.querySelector('.profile .avatar').onclick = () => openAvatarPicker();
   $('s-photo').onclick = () => openAvatarPicker();
   $('s-avatar').onclick = () => openAvatarPicker(true);
@@ -418,7 +463,8 @@ function renderSettings() {
   el.querySelectorAll('.swatch').forEach((b) => { b.onclick = () => { settings.set({ accent: b.dataset.accent }); applyTheme(); renderSettings(); }; });
   el.querySelectorAll('.switch').forEach((b) => {
     b.onclick = () => {
-      const k = b.dataset.set; const v = !settings.get()[k]; settings.set({ [k]: v });
+      const k = b.dataset.set; const cur = k === 'presence' ? settings.get().presence !== false : settings.get()[k]; const v = !cur; settings.set({ [k]: v });
+      if (k === 'presence') { app.setSharePresence(v); toast(v ? 'Friends can see when you are online' : 'Your online status is hidden'); }
       if (k === 'notifications' && v && 'Notification' in window) Notification.requestPermission().catch(() => {});
       if (k === 'discoverable') { app.publishDirectory(v); toast(v ? 'Friends can now find you by username' : 'Removed from username lookup'); }
       if (k === 'haptics' && v) haptic(20);
@@ -499,6 +545,7 @@ document.querySelectorAll('.tabbar button').forEach((b) => {
     document.querySelectorAll('.tabbar button').forEach((x) => x.classList.toggle('active', x === b));
     document.querySelectorAll('.tab-pane').forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== currentTab));
     $('side-title').textContent = { chats: 'Chats', friends: 'Friends', calls: 'Calls', requests: 'Requests', settings: 'Settings' }[currentTab];
+    $('fab-new').classList.toggle('hidden', currentTab !== 'chats');
   };
 });
 $('me-avatar').onclick = () => document.querySelector('.tabbar button[data-tab=settings]').click();
@@ -558,19 +605,22 @@ function renderChat(scrollToEnd = false) {
   setAvatar($('chat-avatar'), id);
   $('chat-name').textContent = app.nameOf(id);
   const can = app.canChat(id);
+  const pending = !group && app.isPending(id);
   $('request-banner').classList.toggle('hidden', group || can || f.status === 'blocked');
   $('request-banner-name').textContent = app.nameOf(id);
+  $('pending-banner').classList.toggle('hidden', !pending);
+  $('pending-name').textContent = app.nameOf(id);
   $('composer').classList.toggle('hidden', !can);
   $('left-note').classList.toggle('hidden', !(group && !g));
-  $('audio-call-btn').classList.toggle('hidden', group || !can);
-  $('video-call-btn').classList.toggle('hidden', group || !can);
-  $('together-btn').classList.toggle('hidden', !can);
+  $('audio-call-btn').classList.toggle('hidden', group || !can || pending);
+  $('video-call-btn').classList.toggle('hidden', group || !can || pending);
+  $('together-btn').classList.toggle('hidden', !can || pending);
   updateTyping();
 
   const box = $('messages');
   const chat = app.store.chat(id);
   const wasAtBottom = atBottom();
-  const key = id + ':' + chat.messages.length + ':' + chat.messages.map((m) => m.id.slice(0, 8) + (m.status || '')).join('') + ':' + (group && g ? g.members.length : '');
+  const key = id + ':' + chat.messages.length + ':' + chat.messages.map((m) => m.id.slice(0, 8) + (m.status || '') + (m.video ? (m.video.ready ? 'R' : m.video.got || 0) + ':' + (app.sending[m.id] ?? '') : '')).join('') + ':' + (group && g ? g.members.length : '') + ':' + [...playing].join('');
   if (renderedFor !== key) {
     renderedFor = key;
     if (renderedChat !== id) { renderedIds = new Set(chat.messages.map((m) => m.id)); renderedChat = id; }
@@ -598,6 +648,7 @@ function renderChat(scrollToEnd = false) {
       const emojiOnly = m.kind === 'text' && m.text.length <= 8 && EMOJI_RE.test(m.text);
       let body;
       if (m.kind === 'image') body = `<img src="${m.img}" alt="Photo" data-full="1">`;
+      else if (m.kind === 'video') body = videoHtml(m);
       else if (m.kind === 'sticker') body = animHtml(m.sticker) || stickerSvg(m.sticker) || '<span class="muted">Sticker</span>';
       else { body = linkify(m.text); const mm = m.text.match(MEDIA_RE); if (mm) body += mediaCard(mm[0], out); }
       let quote = '';
@@ -614,13 +665,15 @@ function renderChat(scrollToEnd = false) {
         else tick = `<span class="tick ${m.status === 'read' ? 'read' : ''}">${m.status === 'sent' || group ? '✓' : '✓✓'}</span>`;
       }
       const sender = group && !out && !cont ? `<div class="sender" style="color:${colorOf(m.from)}">${esc(app.nameOf(m.from))}</div>` : '';
-      html += `<div class="msg ${out ? 'out' : 'in'} ${emojiOnly ? 'emoji-only' : ''} ${m.kind === 'sticker' ? (animOf(m.sticker) ? 'aemoji-msg' : 'sticker-msg') : ''} ${cont ? 'cont' : ''} ${isNew(m) ? 'anim' : ''}" data-id="${m.id}">${sender}<div class="bubble">${quote}${body}</div><div class="meta">${fmtTime(m.ts)} ${tick}</div><button class="act" data-reply="${m.id}" title="Reply">${REPLY_SVG}</button></div>`;
+      html += `<div class="msg ${out ? 'out' : 'in'} ${emojiOnly ? 'emoji-only' : ''} ${m.kind === 'sticker' ? (animOf(m.sticker) ? 'aemoji-msg' : 'sticker-msg') : m.kind === 'video' ? 'video-msg' : ''} ${cont ? 'cont' : ''} ${isNew(m) ? 'anim' : ''}" data-id="${m.id}">${sender}<div class="bubble">${quote}${body}</div><div class="meta">${fmtTime(m.ts)} ${tick}</div><button class="act" data-reply="${m.id}" title="Reply">${REPLY_SVG}</button></div>`;
       prev = m;
     }
     box.innerHTML = html;
     renderedIds = new Set(chat.messages.map((m) => m.id));
     box.querySelectorAll('img[data-full]').forEach((img) => { img.onclick = () => { $('viewer').querySelector('img').src = img.src; $('viewer').classList.remove('hidden'); }; });
-    box.querySelectorAll('[data-resend]').forEach((el) => { el.onclick = () => app.resend(id, el.dataset.resend); });
+    box.querySelectorAll('[data-resend]').forEach((el) => { el.onclick = () => app.resend(id, el.dataset.resend).catch((e) => toast(e.message, 'error')); });
+    box.querySelectorAll('[data-play]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); playVideo(el.dataset.play); }; });
+    box.querySelectorAll('.vid video').forEach((el) => { el.onclick = (e) => e.stopPropagation(); });
     box.querySelectorAll('[data-reply]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); setReply(el.dataset.reply); }; });
     box.querySelectorAll('[data-jump]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); jumpTo(el.dataset.jump); }; });
     box.querySelectorAll('[data-watch]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); startWatch(id, el.dataset.watch); }; });
@@ -630,6 +683,26 @@ function renderChat(scrollToEnd = false) {
     if (scrollToEnd || wasAtBottom || scrollNext) { box.scrollTop = box.scrollHeight; scrollNext = false; }
     updateJump();
   }
+}
+const PLAY_SVG = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+const playing = new Set();
+function videoHtml(m) {
+  const v = m.video || {};
+  const ar = v.w && v.h ? `${v.w}/${v.h}` : '3/4';
+  const data = playing.has(m.id) && app.store.blobs[m.id];
+  if (data) return `<div class="vid" style="--ar:${ar}" data-vid="${m.id}"><video src="${data}" controls autoplay playsinline></video></div>`;
+  const poster = v.poster ? `<img class="poster" src="${v.poster}" alt="">` : '';
+  const sending = app.sending[m.id];
+  let overlay;
+  if (sending !== undefined && m.status === 'pending') overlay = `<div class="prog"><div class="ring" style="--p:${Math.round(sending / (v.n || 1) * 100)}%"></div>Sending ${sending}/${v.n}</div>`;
+  else if (!v.ready) overlay = m.from === app.pk ? `<div class="prog">Only on the device it was sent from</div>` : `<div class="prog"><div class="ring" style="--p:${v.n ? Math.round((v.got || 0) / v.n * 100) : 0}%"></div>Receiving ${v.got || 0}/${v.n}</div>`;
+  else overlay = `<button class="play" data-play="${m.id}" title="Play">${PLAY_SVG}</button>`;
+  return `<div class="vid" style="--ar:${ar}" data-vid="${m.id}">${poster}${overlay}${v.dur ? `<span class="dur">${fmtClock(v.dur)}</span>` : ''}</div>`;
+}
+async function playVideo(id) {
+  const data = await app.getVideo(id);
+  if (!data) { toast('Video is not on this device'); return; }
+  playing.add(id); renderedFor = null; renderChat();
 }
 function jumpTo(mid) {
   const el = $('messages').querySelector(`.msg[data-id="${CSS.escape(mid)}"]`);
@@ -645,13 +718,23 @@ function updateTyping() {
   $('typing-who').textContent = on && isGroupId(id) ? app.nameOf(t.pk) + ' is typing' : '';
   const g = app.group(id);
   let sub;
+  let online = false;
   if (isGroupId(id)) sub = !g ? 'You left this group' : on ? `${app.nameOf(t.pk)} is typing…` : `${g.members.length} members · encrypted`;
-  else sub = app.isBlocked(id) ? 'Blocked' : on ? 'typing…' : 'End-to-end encrypted';
+  else if (app.isBlocked(id)) sub = 'Blocked';
+  else if (on) sub = 'typing…';
+  else if (app.isPending(id)) sub = 'Request sent · not accepted yet';
+  else if (!app.isFriend(id)) sub = 'Wants to be your close friend';
+  else if (app.isOnline(id)) { sub = 'Online'; online = true; }
+  else if (app.lastSeen(id)) sub = 'Last seen ' + fmtAgo(app.lastSeen(id));
+  else sub = 'End-to-end encrypted';
   $('chat-sub').textContent = sub;
+  $('chat-sub').classList.toggle('online', online);
+  $('chat-avatar').classList.toggle('online', isOnline(id));
   if (on && atBottom()) { const box = $('messages'); box.scrollTop = box.scrollHeight; }
 }
 
-$('banner-accept').onclick = () => { app.acceptRequest(app.openChat); toast('Added to close friends'); };
+$('banner-accept').onclick = () => { app.acceptRequest(app.openChat); toast('Added to close friends'); haptic(); };
+$('pending-cancel').onclick = async () => { const pk = app.openChat; if (await confirmSheet('Cancel request?', `${app.nameOf(pk)} will no longer see your friend request.`, 'Cancel request')) { closeChat(); app.cancelRequest(pk); toast('Request cancelled'); } };
 $('banner-block').onclick = () => { app.block(app.openChat); closeChat(); };
 
 /* reply + gestures */
@@ -708,12 +791,14 @@ async function messageMenu(mid) {
   if (m.kind === 'text') items.push({ id: 'copy', label: 'Copy text' });
   if (m.kind === 'text' && MEDIA_RE.test(m.text)) items.push({ id: 'watch', label: 'Watch together' });
   if (m.kind === 'image') items.push({ id: 'view', label: 'View photo' });
+  if (m.kind === 'video' && m.video && m.video.ready) items.push({ id: 'save', label: 'Save video' });
   items.push({ id: 'delete', label: 'Delete for me', danger: true });
   const act = await menuSheet(items);
   if (act === 'reply') setReply(mid);
   else if (act === 'copy') { try { await navigator.clipboard.writeText(m.text); toast('Copied'); } catch { toast('Could not copy'); } }
   else if (act === 'watch') startWatch(id, m.text.match(MEDIA_RE)[0]);
   else if (act === 'view') { $('viewer').querySelector('img').src = m.img; $('viewer').classList.remove('hidden'); }
+  else if (act === 'save') { const data = await app.getVideo(mid); if (!data) { toast('Video is not on this device'); return; } const a = document.createElement('a'); a.href = data; a.download = `chatly-video.${/webm/.test(m.video.mime) ? 'webm' : 'mp4'}`; a.click(); }
   else if (act === 'delete') { app.deleteLocal(id, mid); renderedFor = null; renderChat(); }
 }
 
@@ -745,6 +830,7 @@ $('attach-btn').onclick = () => $('file-input').click();
 $('file-input').onchange = async () => {
   const file = $('file-input').files[0]; $('file-input').value = '';
   if (!file || !app.openChat) return;
+  if (file.type.startsWith('video/') || /\.(mp4|mov|webm|m4v)$/i.test(file.name)) { sendVideoFile(file); return; }
   try {
     const dataUrl = await compressImage(file);
     const re = replyTo; replyTo = null; renderReplyBar();
@@ -753,6 +839,76 @@ $('file-input').onchange = async () => {
     if (m.status === 'failed') toast('Could not send photo: ' + (m.error || 'no relay reachable'), 'error');
   } catch (e) { toast('Could not read that image', 'error'); }
 };
+async function sendVideoFile(file) {
+  const chatId = app.openChat;
+  showModal(`<h3>Preparing video</h3><div class="pbar"><i id="vp-bar" style="width:0%"></i></div><p class="muted tiny" id="vp-text">Compressing on your device — nothing leaves your phone unencrypted.</p>`);
+  try {
+    const video = await prepareVideo(file, (p, label) => { const b = $('vp-bar'); if (b) b.style.width = Math.round(p * 100) + '%'; const t = $('vp-text'); if (t && label) t.textContent = label; });
+    hideModal();
+    const re = replyTo; replyTo = null; renderReplyBar();
+    scrollNext = true; haptic(8);
+    const m = await app.sendMessage(chatId, { video, replyTo: re });
+    if (m.status === 'failed') toast('Could not send video: ' + (m.error || 'no relay reachable'), 'error');
+  } catch (e) { hideModal(); toast(e.message || 'Could not read that video', 'error'); }
+}
+const VIDEO_MAX_SEC = 30, VIDEO_MAX_BYTES = 1150000, VIDEO_MAX_SIDE = 480;
+function seekTo(v, t) { return new Promise((res) => { v.onseeked = () => res(); v.currentTime = t; }); }
+function blobToDataUrl(b) { return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); }); }
+function recorderMime() {
+  for (const t of ['video/mp4;codecs=avc1.42E01E,mp4a.40.2', 'video/mp4;codecs=avc1', 'video/mp4', 'video/webm;codecs=vp9,opus', 'video/webm;codecs=vp8,opus', 'video/webm']) if (window.MediaRecorder && MediaRecorder.isTypeSupported(t)) return t;
+  return '';
+}
+// Videos are re-encoded on-device (canvas + MediaRecorder) to ≤30 s / 480 px at a
+// bitrate that fits ~1.1 MB, then sent as ~40 encrypted relay events.
+async function prepareVideo(file, onProgress) {
+  const url = URL.createObjectURL(file);
+  const v = document.createElement('video');
+  v.src = url; v.playsInline = true; v.preload = 'auto'; v.crossOrigin = 'anonymous';
+  await new Promise((res, rej) => { v.onloadedmetadata = res; v.onerror = () => rej(new Error('This video format is not supported here')); });
+  const total = v.duration || 0;
+  if (!isFinite(total) || !total) throw new Error('Could not read that video');
+  const dur = Math.min(total, VIDEO_MAX_SEC);
+  const scale = Math.min(1, VIDEO_MAX_SIDE / Math.max(v.videoWidth, v.videoHeight));
+  const w = Math.max(2, Math.round(v.videoWidth * scale / 2) * 2), h = Math.max(2, Math.round(v.videoHeight * scale / 2) * 2);
+  await seekTo(v, Math.min(0.2, total / 2));
+  const pc = document.createElement('canvas'); pc.width = Math.round(w / 2); pc.height = Math.round(h / 2);
+  pc.getContext('2d').drawImage(v, 0, 0, pc.width, pc.height);
+  const poster = pc.toDataURL('image/jpeg', 0.5);
+  const done = (data, mime) => { URL.revokeObjectURL(url); return { data, mime, dur: Math.round(dur), w, h, poster }; };
+  if (file.size <= VIDEO_MAX_BYTES && total <= VIDEO_MAX_SEC && /^video\/(mp4|webm)$/.test(file.type)) return done(await blobToDataUrl(file), file.type);
+  const mime = recorderMime();
+  if (!mime) throw new Error('Video compression is not supported in this browser');
+  const encode = async (factor) => {
+    const budget = VIDEO_MAX_BYTES * 8 * 0.82 * factor / dur;
+    const audioBits = 32000, videoBits = Math.max(120000, Math.min(1200000, Math.floor(budget - audioBits)));
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d');
+    const stream = c.captureStream(30);
+    let ac = null;
+    try { ac = new (window.AudioContext || window.webkitAudioContext)(); const src = ac.createMediaElementSource(v); const dest = ac.createMediaStreamDestination(); src.connect(dest); dest.stream.getAudioTracks().forEach((t) => stream.addTrack(t)); } catch {}
+    const rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: videoBits, audioBitsPerSecond: audioBits });
+    const chunks = [];
+    rec.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    const finished = new Promise((res) => { rec.onstop = res; });
+    await seekTo(v, 0);
+    ctx.drawImage(v, 0, 0, w, h);
+    rec.start(500);
+    let raf = 0;
+    const draw = () => { ctx.drawImage(v, 0, 0, w, h); onProgress(Math.min(1, v.currentTime / dur), `Compressing… ${Math.round(Math.min(1, v.currentTime / dur) * 100)}%`); if (v.currentTime >= dur || v.ended) stop(); else raf = requestAnimationFrame(draw); };
+    const stop = () => { cancelAnimationFrame(raf); if (rec.state !== 'inactive') rec.stop(); v.pause(); };
+    v.onended = stop;
+    await v.play();
+    raf = requestAnimationFrame(draw);
+    await finished;
+    if (ac) ac.close().catch(() => {});
+    return new Blob(chunks, { type: mime.split(';')[0] });
+  };
+  let blob = await encode(1);
+  if (blob.size > VIDEO_MAX_BYTES) { onProgress(0, 'Still too big, compressing more…'); v.src = url; await new Promise((res) => { v.onloadedmetadata = res; }); blob = await encode(Math.max(0.3, (VIDEO_MAX_BYTES / blob.size) * 0.9)); }
+  if (blob.size > VIDEO_MAX_BYTES) throw new Error('Video is too large even after compression — try a shorter clip');
+  if (blob.size < 1000) throw new Error('Could not compress that video in this browser');
+  return done(await blobToDataUrl(blob), blob.type || mime.split(';')[0]);
+}
 // Photos are shrunk to fit the ~48 KB encrypted-payload limit of a single relay event.
 async function compressImage(file) {
   const img = await loadImage(file);
@@ -865,7 +1021,7 @@ function showMembers(gid) {
   showModal(`<h3>${esc(g.name)}</h3><div class="pick-list">${g.members.map((pk) => `<div class="row-item" data-pk="${pk}">${avatarHtml(pk)}<span class="name">${esc(pk === app.pk ? 'You' : app.nameOf(pk))}${g.admin === pk ? ' <span class="tiny muted">· created the group</span>' : ''}</span>${pk !== app.pk && !app.isFriend(pk) && !app.isBlocked(pk) ? `<button class="btn ghost small" data-addf="${pk}">Add friend</button>` : ''}</div>`).join('')}</div>
     <div class="row" style="justify-content:flex-end"><button class="btn primary small" id="m-ok">Close</button></div>`);
   $('m-ok').onclick = hideModal;
-  $('modal-body').querySelectorAll('[data-addf]').forEach((b) => { b.onclick = () => { app.addFriend(b.dataset.addf); toast('Friend request sent'); hideModal(); }; });
+  $('modal-body').querySelectorAll('[data-addf]').forEach((b) => { b.onclick = () => { const r = app.addFriend(b.dataset.addf); toast(r === 'accepted' ? 'You are now close friends' : 'Friend request sent'); hideModal(); }; });
 }
 
 /* ---------------- add friend ---------------- */
@@ -904,9 +1060,10 @@ function openAddFriend(tab = 'me') {
     if (hash) { raw = hash[1]; try { name = name || decodeURIComponent(hash[2] || ''); } catch {} }
     const pk = parseFriendCode(raw.replace(/^closechat:/, ''));
     if (!pk) { toast('That is not a valid friend code', 'error'); return; }
-    try { app.addFriend(pk); } catch (e) { toast(e.message, 'error'); return; }
+    let r;
+    try { r = app.addFriend(pk); } catch (e) { toast(e.message, 'error'); return; }
     if (name && !app.state.friends[pk].name) { app.state.friends[pk].name = name; store.save(); }
-    hideModal(); toast('Friend request sent'); haptic(); openChat(pk);
+    hideModal(); toast(r === 'accepted' ? 'You are now close friends' : r === 'friend' ? 'Already close friends' : 'Friend request sent'); haptic(); openChat(pk);
   };
   $('add-code').onclick = () => doAdd($('friend-code').value);
   $('friend-code').onkeydown = (e) => { if (e.key === 'Enter') doAdd($('friend-code').value); };
@@ -918,7 +1075,7 @@ function openAddFriend(tab = 'me') {
     try {
       const found = (await app.lookupUsername(u)).filter((r) => r.pk !== app.pk);
       if (!found.length) { res.innerHTML = `<p class="muted tiny">Nobody named @${esc(u)} has made themselves findable. Ask them for their code or invite link instead.</p>`; return; }
-      res.innerHTML = found.map((r) => `<div class="row-item">${avatarHtml(r.pk, '', r.name || u)}<div class="name"><div>${esc(r.name || '@' + u)}</div><div class="sub">${friendCode(r.pk).slice(0, 16)}…</div></div><button class="btn primary small" data-pk="${r.pk}" ${app.isFriend(r.pk) ? 'disabled' : ''}>${app.isFriend(r.pk) ? 'Friends' : 'Add'}</button></div>`).join('');
+      res.innerHTML = found.map((r) => `<div class="row-item">${avatarHtml(r.pk, '', r.name || u)}<div class="name"><div>${esc(r.name || '@' + u)}</div><div class="sub">${friendCode(r.pk).slice(0, 16)}…</div></div><button class="btn primary small" data-pk="${r.pk}" ${app.isFriend(r.pk) || app.isPending(r.pk) ? 'disabled' : ''}>${app.isFriend(r.pk) ? 'Friends' : app.isPending(r.pk) ? 'Requested' : 'Add'}</button></div>`).join('');
       res.querySelectorAll('[data-pk]').forEach((b) => { b.onclick = () => doAdd(b.dataset.pk, found.find((r) => r.pk === b.dataset.pk).name); });
     } catch (e) { res.innerHTML = `<p class="muted tiny">Search failed: ${esc(e.message)}</p>`; }
   };
@@ -1054,7 +1211,18 @@ function renderGame() {
 }
 
 /* ---------------- calls ---------------- */
-let callTimer = null, ringVib = null, lastCallState = '';
+let callTimer = null, ringVib = null, lastCallState = '', callMini = false, lastCallInfo = null;
+function setCallMini(on) {
+  callMini = on;
+  const ov = $('call');
+  ov.classList.toggle('mini', on);
+  ov.classList.toggle('voice', on && !(lastCallInfo && lastCallInfo.video));
+  document.body.classList.toggle('call-mini', on);
+  if (on) haptic(6);
+}
+$('call-min-btn').onclick = (e) => { e.stopPropagation(); setCallMini(true); };
+$('mini-hang').onclick = (e) => { e.stopPropagation(); calls.hangup(); };
+$('call').addEventListener('click', (e) => { if (callMini && !e.target.closest('#mini-hang')) setCallMini(false); });
 function startCall(pk, video) {
   if (isGroupId(pk)) { toast('Group calls are not supported yet'); return; }
   if (!app.isFriend(pk)) { toast('Accept the friend request first'); return; }
@@ -1114,7 +1282,8 @@ function wireCalls() {
 function renderCall(info) {
   const ov = $('call');
   if (info.state === 'idle') {
-    lastCallState = 'idle';
+    lastCallState = 'idle'; lastCallInfo = null;
+    if (callMini) setCallMini(false);
     ov.classList.add('hidden'); tones.stop(); clearInterval(callTimer); clearInterval(ringVib); ringVib = null;
     closeCallNotification();
     if (nativeAudio) { try { nativeAudio.postMessage('reset'); } catch {} }
@@ -1123,9 +1292,14 @@ function renderCall(info) {
     return;
   }
   ov.classList.remove('hidden');
+  lastCallInfo = info;
+  if (lastCallState === 'idle' || lastCallState === '') { if (callMini) setCallMini(false); ov.style.setProperty('--call-bg', app.avatarOf(info.peer) ? `url("${app.avatarOf(info.peer)}")` : 'none'); }
+  if (callMini) ov.classList.toggle('voice', !info.video);
   setAvatar($('call-avatar'), info.peer);
   $('call-name').textContent = app.nameOf(info.peer);
+  $('mini-name').textContent = app.nameOf(info.peer);
   const incoming = info.state === 'incoming';
+  $('call-min-btn').classList.toggle('hidden', incoming);
   $('incoming-controls').classList.toggle('hidden', !incoming);
   $('call-controls').classList.toggle('hidden', incoming);
   $('local-video').classList.toggle('hidden', !info.video || !info.local);
@@ -1150,12 +1324,12 @@ function renderCall(info) {
   } else {
     clearInterval(ringVib); ringVib = null; closeCallNotification();
   }
-  if (info.state === 'outgoing') status.textContent = 'Calling…';
-  else if (info.state === 'connecting') { tones.stop(); status.textContent = 'Connecting…'; }
+  if (info.state === 'outgoing') status.textContent = $('mini-time').textContent = 'Calling…';
+  else if (info.state === 'connecting') { tones.stop(); status.textContent = $('mini-time').textContent = 'Connecting…'; }
   else if (info.state === 'active') {
     tones.stop();
     if (lastCallState !== 'active') setSpeaker(!!info.video);
-    const upd = () => { const s = Math.floor((Date.now() - info.startedAt) / 1000); status.textContent = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')} · encrypted`; };
+    const upd = () => { const s = Math.floor((Date.now() - info.startedAt) / 1000); const clock = `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; status.textContent = `${clock} · encrypted`; $('mini-time').textContent = clock; };
     upd(); callTimer = setInterval(upd, 1000);
   }
   lastCallState = info.state;

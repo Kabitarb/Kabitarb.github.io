@@ -1,11 +1,16 @@
 import {
-  pubkeyOf, createRumor, wrapFor, unwrap, directoryEvent,
-  KIND_TEXT, KIND_IMAGE, KIND_STICKER, KIND_CONTROL, WRAP_KIND,
+  pubkeyOf, createRumor, wrapFor, unwrap, directoryEvent, backupEvent, openBackup, backupTag,
+  KIND_TEXT, KIND_IMAGE, KIND_STICKER, KIND_VIDEO, KIND_CHUNK, KIND_CONTROL, WRAP_KIND,
 } from './crypto.js';
 
 export const isGroupId = (id) => typeof id === 'string' && id.startsWith('g:');
 export const gidOf = (id) => id.slice(2);
 const MAX_GROUP = 16;
+const CHUNK = 30000;            // chars of base64 per relay event (fits the ~48 KB payload limit)
+const MAX_VIDEO = 1600000;      // data-URL chars, ~1.2 MB of video
+const PRESENCE_EVERY = 50000;
+const ONLINE_WINDOW = 125000;
+const isMessageKind = (k) => k === KIND_TEXT || k === KIND_IMAGE || k === KIND_STICKER || k === KIND_VIDEO;
 
 // Core protocol layer: turns decrypted rumors into state changes and state
 // changes into encrypted gift wraps. A "chat id" is either a friend's pubkey
@@ -25,6 +30,11 @@ export class App extends EventTarget {
     this.watchHandler = null;
     this.pendingGroup = {};   // gid -> rumors that arrived before the group sync
     this.ready = false;
+    this.presence = {};       // pk -> last heartbeat ms (not persisted)
+    this.sharePresence = true;
+    this.lastBackupFp = '';
+    this.backupTimer = null;
+    this.sending = {};        // vid -> chunks published so far
   }
 
   get state() { return this.store.state; }
@@ -33,15 +43,28 @@ export class App extends EventTarget {
   async start() {
     await this.transport.connect();
     const since = this.state.lastSync ? this.state.lastSync - 3 * 24 * 3600 : Math.floor(Date.now() / 1000) - 90 * 24 * 3600;
-    this.transport.listen(this.pk, since, (w) => this.handleWrap(w), () => { this.ready = true; this.emit('ready'); });
+    this.transport.listen(this.pk, since, (w) => this.handleWrap(w), () => {
+      if (this.ready) return;
+      this.ready = true; this.emit('ready');
+      this.restoreBackup().catch((e) => console.warn('restore failed', e.message));
+      this.startPresence();
+    });
+    this.store.onChange(() => this.checkBackup());
   }
+
+  stop() { clearInterval(this.presenceTimer); clearTimeout(this.backupTimer); }
 
   /* ---------- identity helpers ---------- */
   isFriend(pk) { const f = this.state.friends[pk]; return !!f && f.status === 'friend'; }
+  isPending(pk) { const f = this.state.friends[pk]; return !!f && f.status === 'pending'; }
+  friendPks() { return Object.entries(this.state.friends).filter(([, f]) => f.status === 'friend').map(([pk]) => pk); }
+  isOnline(pk) { return Date.now() - (this.presence[pk] || 0) < ONLINE_WINDOW; }
+  lastSeen(pk) { const f = this.state.friends[pk]; return Math.max((f && f.lastSeen) || 0, this.presence[pk] || 0); }
+  touch(pk) { if (pk === this.pk || !this.state.friends[pk]) return; this.presence[pk] = Date.now(); this.state.friends[pk].lastSeen = Date.now(); }
   isBlocked(pk) { const f = this.state.friends[pk]; return !!f && f.status === 'blocked'; }
   group(id) { return isGroupId(id) ? this.state.groups[gidOf(id)] : null; }
   inGroup(gid, pk) { const g = this.state.groups[gid]; return !!g && g.members.includes(pk); }
-  canChat(id) { return isGroupId(id) ? this.inGroup(gidOf(id), this.pk) : this.isFriend(id); }
+  canChat(id) { return isGroupId(id) ? this.inGroup(gidOf(id), this.pk) : this.isFriend(id) || this.isPending(id); }
   members(id) { const g = this.group(id); return g ? g.members.filter((p) => p !== this.pk) : [id]; }
   nameOf(id) {
     if (id === this.pk) return this.state.profile.name || 'You';
@@ -74,7 +97,8 @@ export class App extends EventTarget {
 
   handleRumor(rumor) {
     try {
-      if (rumor.kind === KIND_TEXT || rumor.kind === KIND_IMAGE || rumor.kind === KIND_STICKER) this.handleMessage(rumor);
+      if (isMessageKind(rumor.kind)) this.handleMessage(rumor);
+      else if (rumor.kind === KIND_CHUNK) this.handleChunk(rumor);
       else if (rumor.kind === KIND_CONTROL) this.handleControl(rumor);
     } catch (e) { console.error('bad rumor', e); }
   }
@@ -85,7 +109,7 @@ export class App extends EventTarget {
     const ms = this.tag(rumor, 'ms');
     const g = this.tag(rumor, 'g');
     const re = rumor.tags.find((t) => t[0] === 're');
-    const kind = rumor.kind === KIND_IMAGE ? 'image' : rumor.kind === KIND_STICKER ? 'sticker' : 'text';
+    const kind = rumor.kind === KIND_IMAGE ? 'image' : rumor.kind === KIND_STICKER ? 'sticker' : rumor.kind === KIND_VIDEO ? 'video' : 'text';
     const m = {
       id: rumor.id, from: rumor.pubkey, to: this.tag(rumor, 'p'), kind,
       text: kind === 'text' ? rumor.content : '',
@@ -93,6 +117,11 @@ export class App extends EventTarget {
       sticker: kind === 'sticker' ? rumor.content : '',
       ts: ms ? Number(ms) : rumor.created_at * 1000,
     };
+    if (kind === 'video') {
+      let v = {}; try { v = JSON.parse(rumor.content) || {}; } catch {}
+      m.video = { n: Math.min(200, Number(v.n) || 0), mime: String(v.mime || 'video/mp4').slice(0, 40), dur: Number(v.dur) || 0, w: Number(v.w) || 0, h: Number(v.h) || 0, size: Number(v.size) || 0, poster: typeof v.poster === 'string' && v.poster.length < 12000 ? v.poster : '' };
+      m.text = '';
+    }
     if (g) m.g = g;
     if (re) m.re = { id: re[1], from: re[2] || '', text: re[3] || '' };
     return m;
@@ -114,10 +143,12 @@ export class App extends EventTarget {
       this.state.friends[m.from] = { name: '', status: 'request', since: Date.now() };
       this.emit('request', { pk: m.from });
     }
+    if (this.isFriend(m.from) && this.ready) this.touch(m.from);
     const chat = this.store.chat(m.from);
     if (chat.messages.some((x) => x.id === m.id)) return;
     m.status = 'received';
     this.insertMessage(chat, m);
+    if (m.kind === 'video') this.assembleVideo(m.id);
     const onScreen = this.openChat === m.from && this.visible;
     if (onScreen && this.isFriend(m.from)) {
       m.acked = 'read';
@@ -150,7 +181,9 @@ export class App extends EventTarget {
     if (chat.messages.some((x) => x.id === m.id)) return;
     m.status = m.from === this.pk ? 'sent' : 'received';
     this.insertMessage(chat, m);
+    if (m.kind === 'video') this.assembleVideo(m.id);
     if (m.from === this.pk) return;
+    this.touch(m.from);
     const onScreen = this.openChat === chatId && this.visible;
     if (!onScreen) chat.unread++;
     this.emit('typing', { pk: m.from, chatId, on: false });
@@ -170,7 +203,9 @@ export class App extends EventTarget {
     const to = this.tag(rumor, 'p');
     if (c.t === 'friend' && to && to !== this.pk) {
       const f = this.state.friends[to] || (this.state.friends[to] = { name: '', since: Date.now() });
-      if (f.status !== 'blocked') f.status = 'friend';
+      if (f.status === 'blocked') return;
+      if (c.a === 'accept') f.status = 'friend';
+      else if (f.status !== 'friend') f.status = f.status === 'request' ? 'friend' : 'pending';
       this.store.chat(to);
     } else if (c.t === 'profile') {
       if (c.name) this.state.profile.name = String(c.name).slice(0, 40);
@@ -215,6 +250,7 @@ export class App extends EventTarget {
         if (ageSec > 15) return;
         const chatId = this.chatIdFor(from, c);
         if (c.g ? !this.inGroup(c.g, from) : !this.isFriend(from)) return;
+        this.touch(from);
         this.emit('typing', { pk: from, chatId, on: !!c.on });
         break;
       }
@@ -222,10 +258,17 @@ export class App extends EventTarget {
         const f = this.state.friends[from] || (this.state.friends[from] = { name: '', status: 'request', since: Date.now() });
         if (c.name) f.name = String(c.name).slice(0, 40);
         if (typeof c.av === 'string' && c.av.length < 20000) f.avatar = c.av;
-        if (c.a === 'accept') { if (f.status === 'request') f.status = 'friend'; this.emit('friend', { pk: from, accepted: true }); }
-        else if (c.a === 'request') {
-          if (f.status === 'friend') this.sendControl(from, { t: 'friend', a: 'accept', name: this.state.profile.name, av: this.state.profile.avatar });
-          else this.emit('request', { pk: from, fresh: this.ready });
+        if (c.a === 'accept') {
+          if (f.status === 'request' || f.status === 'pending' || f.status === 'contact') { f.status = 'friend'; f.since = Date.now(); }
+          this.touch(from);
+          this.emit('friend', { pk: from, accepted: true });
+        } else if (c.a === 'request') {
+          if (f.status === 'friend' || f.status === 'pending') {
+            // Mutual request (or they re-sent): we already want them, so this completes the handshake.
+            f.status = 'friend';
+            this.sendControl(from, { t: 'friend', a: 'accept', name: this.state.profile.name, av: this.state.profile.avatar });
+            this.emit('friend', { pk: from, accepted: true });
+          } else { if (f.status === 'contact') f.status = 'request'; this.emit('request', { pk: from, fresh: this.ready }); }
         }
         break;
       }
@@ -234,7 +277,24 @@ export class App extends EventTarget {
         if (!f) return;
         if (c.name) f.name = String(c.name).slice(0, 40);
         if (typeof c.av === 'string' && c.av.length < 20000) f.avatar = c.av;
+        if (c.req && this.knows(from)) this.sendControl(from, { t: 'profile', name: this.state.profile.name, av: this.state.profile.avatar });
         this.emit('friend', { pk: from });
+        break;
+      }
+      case 'vreq': {
+        if (!Array.isArray(c.miss) || !/^[0-9a-f]{64}$/.test(String(c.v || ''))) return;
+        const hit = this.findMessage(c.v);
+        if (!hit || hit.m.from !== this.pk) return;
+        const ok = isGroupId(hit.chatId) ? this.inGroup(gidOf(hit.chatId), from) : hit.chatId === from;
+        if (ok) this.resendChunks(from, c.v, c.miss.map(Number).filter((i) => Number.isInteger(i)).slice(0, 60));
+        break;
+      }
+      case 'presence': {
+        if (!this.isFriend(from) || ageSec > 120) return;
+        const f = this.state.friends[from];
+        if (c.on) { this.presence[from] = Date.now(); f.lastSeen = Date.now(); if (c.q) this.sendPresence([from], false); }
+        else { this.presence[from] = 0; f.lastSeen = Date.now(); }
+        this.emit('presence', { pk: from });
         break;
       }
       case 'group':
@@ -399,15 +459,22 @@ export class App extends EventTarget {
     this.publishRumor(this.pk, rumor).catch((e) => console.warn('self sync failed', e.message));
   }
 
-  async sendMessage(chatId, { text, img, sticker, replyTo }) {
-    const kind = img ? KIND_IMAGE : sticker ? KIND_STICKER : KIND_TEXT;
+  async sendMessage(chatId, { text, img, sticker, video, replyTo }) {
+    const kind = video ? KIND_VIDEO : img ? KIND_IMAGE : sticker ? KIND_STICKER : KIND_TEXT;
     const ts = Date.now();
     const tags = [['ms', String(ts)]];
     const group = isGroupId(chatId);
     if (group) tags.push(['g', gidOf(chatId)]); else tags.push(['p', chatId]);
     if (replyTo) tags.push(['re', replyTo.id, replyTo.from || '', String(replyTo.text || '').slice(0, 120)]);
-    const rumor = createRumor(this.sk, kind, img || sticker || text, tags);
-    const m = { id: rumor.id, from: this.pk, to: group ? '' : chatId, kind: img ? 'image' : sticker ? 'sticker' : 'text', text: text || '', img: img || '', sticker: sticker || '', ts, status: 'pending' };
+    let meta = null, parts = [];
+    if (video) {
+      if (video.data.length > MAX_VIDEO) throw new Error('Video is too large after compression');
+      for (let i = 0; i < video.data.length; i += CHUNK) parts.push(video.data.slice(i, i + CHUNK));
+      meta = { n: parts.length, mime: video.mime, dur: video.dur, w: video.w, h: video.h, size: video.data.length, poster: video.poster || '' };
+    }
+    const rumor = createRumor(this.sk, kind, video ? JSON.stringify(meta) : img || sticker || text, tags);
+    const m = { id: rumor.id, from: this.pk, to: group ? '' : chatId, kind: video ? 'video' : img ? 'image' : sticker ? 'sticker' : 'text', text: text || '', img: img || '', sticker: sticker || '', ts, status: 'pending' };
+    if (video) { m.video = Object.assign({ ready: true }, meta); await this.store.putBlob(rumor.id, video.data); }
     if (group) m.g = gidOf(chatId);
     if (replyTo) m.re = { id: replyTo.id, from: replyTo.from || '', text: String(replyTo.text || '').slice(0, 120) };
     const chat = this.store.chat(chatId);
@@ -417,6 +484,7 @@ export class App extends EventTarget {
     try {
       if (group) await this.publishToMany(this.members(chatId), rumor, false, true);
       else await this.publishRumor(chatId, rumor, false, true);
+      if (video) await this.sendChunks(chatId, rumor.id, parts);
       if (m.status === 'pending') m.status = 'sent';
     } catch (e) {
       m.status = 'failed'; m.error = e.message;
@@ -425,12 +493,99 @@ export class App extends EventTarget {
     return m;
   }
 
+  // Video bodies travel as a series of small encrypted events referencing the
+  // header message; sent two at a time so public relays don't rate-limit us.
+  async sendChunks(chatId, vid, parts) {
+    const group = isGroupId(chatId);
+    this.sending[vid] = 0;
+    for (let i = 0; i < parts.length; i++) {
+      await this.sendChunk(chatId, vid, i, parts[i]);
+      this.sending[vid] = i + 1;
+      this.emit('media', { vid, sent: i + 1, n: parts.length });
+      if (i + 1 < parts.length) await new Promise((r) => setTimeout(r, 200));
+    }
+    delete this.sending[vid];
+  }
+  sendChunk(chatId, vid, idx, chunk, toPk = null) {
+    const group = isGroupId(chatId);
+    const tags = [['v', vid, String(idx)]];
+    if (group) tags.push(['g', gidOf(chatId)]); else tags.push(['p', chatId]);
+    const r = createRumor(this.sk, KIND_CHUNK, chunk, tags);
+    this.store.markRumor(r.id);
+    return toPk ? this.publishRumor(toPk, r, false, false) : group ? this.publishToMany(this.members(chatId), r, false, false) : this.publishRumor(chatId, r, false, false);
+  }
+  // Public relays drop or rate-limit some events; a receiver that is still
+  // missing pieces 15 s after the last one asks the sender to resend just those.
+  scheduleChunkCheck(vid) {
+    this.chunkTimers ||= {};
+    clearTimeout(this.chunkTimers[vid]);
+    this.chunkTimers[vid] = setTimeout(() => this.requestMissing(vid), 15000);
+  }
+  requestMissing(vid) {
+    const hit = this.findMessage(vid); if (!hit || hit.m.kind !== 'video' || hit.m.video.ready || hit.m.from === this.pk) return;
+    const e = this.state.mediaParts[vid]; const n = hit.m.video.n; if (!n) return;
+    const miss = []; for (let i = 0; i < n; i++) if (!e || !e.parts[i]) miss.push(i);
+    if (!miss.length) return;
+    hit.m.video.tries = (hit.m.video.tries || 0) + 1;
+    if (hit.m.video.tries > 6) return;
+    this.sendControl(hit.m.from, { t: 'vreq', v: vid, miss: miss.slice(0, 60) });
+    this.scheduleChunkCheck(vid);
+  }
+  async resendChunks(toPk, vid, miss) {
+    const hit = this.findMessage(vid); if (!hit || hit.m.from !== this.pk) return;
+    const data = await this.getVideo(vid); if (!data) return;
+    const n = Math.ceil(data.length / CHUNK);
+    for (const i of miss) {
+      if (!(i >= 0 && i < n)) continue;
+      try { await this.sendChunk(hit.chatId, vid, i, data.slice(i * CHUNK, (i + 1) * CHUNK), toPk); } catch (e) { console.warn('resend chunk failed', e.message); }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+
+  handleChunk(rumor) {
+    const t = rumor.tags.find((x) => x[0] === 'v'); if (!t) return;
+    const vid = String(t[1] || ''), idx = Number(t[2]);
+    if (!/^[0-9a-f]{64}$/.test(vid) || !(idx >= 0 && idx < 200) || rumor.content.length > CHUNK + 100) return;
+    if (rumor.pubkey !== this.pk && !this.knows(rumor.pubkey) && !this.isPending(rumor.pubkey) && !this.state.friends[rumor.pubkey]) return;
+    const mp = this.state.mediaParts;
+    const e = mp[vid] || (mp[vid] = { from: rumor.pubkey, parts: {}, ts: Date.now() });
+    if (e.from !== rumor.pubkey) return;
+    e.parts[idx] = rumor.content;
+    // keep at most a few in-flight videos in state
+    const ids = Object.keys(mp); if (ids.length > 6) { ids.sort((a, b) => mp[a].ts - mp[b].ts); delete mp[ids[0]]; }
+    this.assembleVideo(vid);
+  }
+
+  findMessage(id) {
+    for (const [chatId, chat] of Object.entries(this.state.chats)) { const m = chat.messages.find((x) => x.id === id); if (m) return { chatId, m }; }
+    return null;
+  }
+
+  assembleVideo(vid) {
+    const hit = this.findMessage(vid); if (!hit || hit.m.kind !== 'video' || hit.m.video.ready) return;
+    const e = this.state.mediaParts[vid]; const n = hit.m.video.n;
+    const got = e ? Object.keys(e.parts).length : 0;
+    hit.m.video.got = got;
+    if (!e || !n || got < n || e.from !== hit.m.from) { this.emit('media', { vid, got, n }); if (this.ready) this.scheduleChunkCheck(vid); return; }
+    clearTimeout((this.chunkTimers || {})[vid]);
+    let data = ''; for (let i = 0; i < n; i++) data += e.parts[i];
+    delete this.state.mediaParts[vid];
+    hit.m.video.ready = true;
+    this.store.putBlob(vid, data).then(() => this.emit('media', { vid, ready: true }));
+  }
+
+  getVideo(vid) { return this.store.getBlob(vid); }
+
   async resend(chatId, id) {
     const chat = this.store.chat(chatId);
     const m = chat.messages.find((x) => x.id === id);
     if (!m) return;
     chat.messages.splice(chat.messages.indexOf(m), 1);
     this.store.save();
+    if (m.kind === 'video') {
+      const data = await this.getVideo(id); if (!data) throw new Error('Video is no longer on this device');
+      return this.sendMessage(chatId, { video: { data, mime: m.video.mime, dur: m.video.dur, w: m.video.w, h: m.video.h, poster: m.video.poster }, replyTo: m.re });
+    }
     return this.sendMessage(chatId, { text: m.text, img: m.img, sticker: m.sticker, replyTo: m.re });
   }
 
@@ -466,15 +621,24 @@ export class App extends EventTarget {
   addFriend(pk) {
     if (pk === this.pk) throw new Error("That's your own code");
     const f = this.state.friends[pk] || (this.state.friends[pk] = { name: '', since: Date.now() });
-    f.status = 'friend';
+    if (f.status === 'request') { this.acceptRequest(pk); return 'accepted'; }
+    if (f.status === 'friend') return 'friend';
+    f.status = 'pending'; f.since = Date.now();
     this.store.chat(pk);
     this.store.save();
     this.sendControl(pk, { t: 'friend', a: 'request', name: this.state.profile.name, av: this.state.profile.avatar });
+    return 'pending';
+  }
+  cancelRequest(pk) {
+    const f = this.state.friends[pk]; if (!f || f.status !== 'pending') return;
+    delete this.state.friends[pk]; delete this.state.chats[pk];
+    this.store.save();
+    this.syncToSelf({ t: 'unfriend', pk });
   }
 
   acceptRequest(pk) {
     const f = this.state.friends[pk]; if (!f) return;
-    f.status = 'friend';
+    f.status = 'friend'; f.since = Date.now(); this.touch(pk);
     const chat = this.store.chat(pk);
     const ids = chat.messages.filter((m) => m.from === pk).map((m) => { m.acked = 'delivered'; return m.id; });
     if (ids.length) this.sendControl(pk, { t: 'receipt', ids: ids.slice(-50), s: 'delivered' });
@@ -520,6 +684,89 @@ export class App extends EventTarget {
     this.transport.publish(ev).catch((e) => console.warn('directory publish failed', e.message));
   }
   lookupUsername(u) { return this.transport.lookup(u); }
+
+  /* ---------- presence ---------- */
+  startPresence() {
+    clearInterval(this.presenceTimer);
+    this.presenceTimer = setInterval(() => { if (this.visible) this.sendPresence(null, false); }, PRESENCE_EVERY);
+    this.sendPresence(null, true);
+  }
+  // Ephemeral "I'm here" heartbeat to every friend; `query` asks them to answer
+  // so both sides learn each other's state right away.
+  sendPresence(pks, query, off = false) {
+    if (!this.sharePresence && !off) return;
+    const targets = pks || this.friendPks();
+    if (!targets.length) return;
+    const obj = { t: 'presence', on: off ? 0 : 1 };
+    if (query && !off) obj.q = 1;
+    this.sendToMany(targets, obj, true, false);
+  }
+  setVisible(v) {
+    const was = this.visible; this.visible = v;
+    if (!this.ready) return;
+    if (v && !was) this.sendPresence(null, true);
+    else if (!v && was) this.sendPresence(null, false, true);
+  }
+  setSharePresence(on) { this.sharePresence = !!on; if (!on) this.sendPresence(null, false, true); else this.sendPresence(null, true); }
+
+  /* ---------- encrypted account backup ---------- */
+  backupSnapshot() {
+    const friends = {}, groups = {};
+    for (const [pk, f] of Object.entries(this.state.friends)) if (['friend', 'pending', 'blocked', 'request'].includes(f.status)) friends[pk] = { n: f.name || '', s: f.status, t: f.since || 0 };
+    for (const [gid, g] of Object.entries(this.state.groups)) if (g.members.includes(this.pk)) groups[gid] = { n: g.name, m: g.members, a: g.admin, t: g.since || 0, ts: g.ts || 0 };
+    const p = this.state.profile;
+    return { v: 1, profile: { name: p.name || '', username: p.username || '' }, friends, groups };
+  }
+  checkBackup() {
+    if (!this.ready) return;
+    const fp = JSON.stringify(this.backupSnapshot());
+    if (fp === this.lastBackupFp) return;
+    clearTimeout(this.backupTimer);
+    this.backupTimer = setTimeout(() => this.publishBackup(), 4000);
+  }
+  async publishBackup() {
+    const snap = this.backupSnapshot();
+    const fp = JSON.stringify(snap);
+    if (!Object.keys(snap.friends).length && !Object.keys(snap.groups).length) { this.lastBackupFp = fp; return; }
+    snap.ts = Date.now();
+    try { await this.transport.publish(backupEvent(this.sk, snap)); this.lastBackupFp = fp; }
+    catch (e) { console.warn('backup publish failed', e.message); }
+  }
+  async restoreBackup() {
+    let ev = null;
+    try { ev = await this.transport.fetchBackup(this.pk, backupTag(this.pk)); } catch (e) { console.warn('backup fetch failed', e.message); }
+    if (!ev) { this.checkBackup(); return; }
+    let b; try { b = openBackup(this.sk, ev); } catch (e) { console.warn('backup unreadable', e.message); return; }
+    const added = [];
+    for (const [pk, r] of Object.entries(b.friends || {})) {
+      if (!/^[0-9a-f]{64}$/.test(pk) || pk === this.pk) continue;
+      const f = this.state.friends[pk];
+      if (!f || f.status === 'contact') {
+        this.state.friends[pk] = Object.assign(f || {}, { name: (f && f.name) || String(r.n || '').slice(0, 40), status: ['friend', 'pending', 'blocked', 'request'].includes(r.s) ? r.s : 'friend', since: Number(r.t) || Date.now() });
+        if (r.s === 'friend' || r.s === 'pending') { this.store.chat(pk); added.push(pk); }
+      }
+    }
+    for (const [gid, r] of Object.entries(b.groups || {})) {
+      if (!/^[0-9a-f]{16}$/.test(gid) || this.state.groups[gid]) continue;
+      if (!Array.isArray(r.m) || !r.m.includes(this.pk)) continue;
+      const members = r.m.filter((p) => /^[0-9a-f]{64}$/.test(p)).slice(0, MAX_GROUP);
+      this.state.groups[gid] = { name: String(r.n || 'Group').slice(0, 40), members, admin: r.a, since: Number(r.t) || Date.now(), ts: Number(r.ts) || 0, left: {} };
+      this.store.chat('g:' + gid);
+      for (const p of members) if (p !== this.pk && !this.state.friends[p]) { this.state.friends[p] = { name: '', status: 'contact', since: Date.now() }; added.push(p); }
+      const q = this.pendingGroup[gid]; delete this.pendingGroup[gid];
+      if (q) for (const rr of q) this.handleRumor(rr);
+    }
+    const p = this.state.profile;
+    if (b.profile) { if ((!p.name || p.name === 'Me') && b.profile.name) p.name = String(b.profile.name).slice(0, 40); if (!p.username && b.profile.username) p.username = b.profile.username; }
+    this.lastBackupFp = JSON.stringify(this.backupSnapshot());
+    if (added.length) {
+      this.store.save();
+      // Ask restored contacts for their current name/photo (not kept in the backup).
+      this.sendToMany(added, { t: 'profile', name: p.name, av: p.avatar, req: 1 }, false, false);
+      this.sendPresence(added.filter((pk) => this.isFriend(pk)), true);
+      this.emit('restored', { n: added.length });
+    }
+  }
 
   /* ---------- calls ---------- */
   logCall(entry, fromSync = false) {

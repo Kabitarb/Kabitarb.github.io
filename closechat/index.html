@@ -13,6 +13,8 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -61,12 +63,13 @@
       </button>
     </header>
     <div class="side-body">
-      <section class="tab-pane" data-pane="chats"><div class="search"><input id="chat-search" type="search" placeholder="Search friends"></div><div id="chat-list" class="list"></div></section>
+      <section class="tab-pane" data-pane="chats"><div class="search"><input id="chat-search" type="search" placeholder="Search"></div><div id="active-row" class="active-row hidden"></div><div id="chat-list" class="list"></div></section>
       <section class="tab-pane hidden" data-pane="friends"><div class="search"><input id="friend-search" type="search" placeholder="Search friends"></div><div id="friend-list" class="list"></div></section>
       <section class="tab-pane hidden" data-pane="calls"><div id="call-list" class="list"></div></section>
       <section class="tab-pane hidden" data-pane="requests"><div id="request-list" class="list"></div></section>
       <section class="tab-pane hidden" data-pane="settings"><div id="settings" class="settings"></div></section>
     </div>
+    <button class="fab" id="fab-new" title="New message"><svg viewBox="0 0 24 24"><path d="M3 17.3V21h3.7L17.8 9.9l-3.7-3.7L3 17.3Zm17.7-10.2a1 1 0 0 0 0-1.4l-2.4-2.4a1 1 0 0 0-1.4 0L15 5.2l3.7 3.7 2-1.8Z"/></svg></button>
     <nav class="tabbar">
       <button data-tab="chats" class="active"><svg viewBox="0 0 24 24"><path d="M12 3C6.5 3 2 6.9 2 11.7c0 2.5 1.2 4.7 3.2 6.3L4.5 21l3.6-1.9c1.2.4 2.5.6 3.9.6 5.5 0 10-3.9 10-8.7S17.5 3 12 3Z"/></svg><span>Chats</span></button>
       <button data-tab="friends"><svg viewBox="0 0 24 24"><path d="M16 11a3.5 3.5 0 1 0-3.5-3.5A3.5 3.5 0 0 0 16 11Zm-8 1a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm8 1c-2.7 0-8 1.3-8 4v3h16v-3c0-2.7-5.3-4-8-4Zm-8 1c-.3 0-.6 0-1 .1C4.6 15 2 16.3 2 18v3h4v-3c0-1.3.6-2.6 2-3.9Z"/></svg><span>Friends</span></button>
@@ -92,6 +95,10 @@
         <button class="icon-btn" id="together-btn" title="Watch & play together"><svg viewBox="0 0 24 24"><path d="M7 6h10a5 5 0 0 1 5 5v2a5 5 0 0 1-5 5h-1.5l-2.1-2.5h-2.8L8.5 18H7a5 5 0 0 1-5-5v-2a5 5 0 0 1 5-5Zm1 3v2H6v2h2v2h2v-2h2v-2h-2V9Zm8 0a1.2 1.2 0 1 0 0 2.4A1.2 1.2 0 0 0 16 9Zm2 3a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Z"/></svg></button>
         <button class="icon-btn" id="chat-menu-btn" title="More"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
       </header>
+      <div class="request-banner pending hidden" id="pending-banner">
+        <p>Friend request sent to <b id="pending-name"></b>. Your messages reach them, but they'll only see them once they accept.</p>
+        <div><button class="btn ghost small" id="pending-cancel">Cancel request</button></div>
+      </div>
       <div class="request-banner hidden" id="request-banner">
         <p><b id="request-banner-name"></b> isn't in your close friends yet. Accept to chat and call, or block.</p>
         <div><button class="btn primary small" id="banner-accept">Accept</button><button class="btn ghost small" id="banner-block">Block</button></div>
@@ -105,8 +112,8 @@
       <div class="picker hidden" id="picker"><div class="picker-tabs" id="picker-tabs"></div><div class="picker-body" id="picker-body"></div></div>
       <div class="left-note hidden" id="left-note">You are no longer in this group.</div>
       <footer class="composer" id="composer">
-        <button class="icon-btn" id="attach-btn" title="Send photo"><svg viewBox="0 0 24 24"><path d="M4 5h3l1.5-2h7L17 5h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm8 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg></button>
-        <input type="file" id="file-input" accept="image/*" hidden>
+        <button class="icon-btn" id="attach-btn" title="Send photo or video"><svg viewBox="0 0 24 24"><path d="M4 5h3l1.5-2h7L17 5h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm8 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg></button>
+        <input type="file" id="file-input" accept="image/*,video/*" hidden>
         <textarea id="input" rows="1" placeholder="Message"></textarea>
         <button class="icon-btn" id="emoji-btn" title="Emoji"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM7 14h10a5 5 0 0 1-10 0Z"/></svg></button>
         <button class="icon-btn send" id="send-btn" title="Send"><svg viewBox="0 0 24 24"><path d="M3 11.5 21 3l-4 18-5-7.5Z"/></svg></button>
@@ -118,6 +125,8 @@
 <!-- ============ CALL ============ -->
 <div id="call" class="overlay hidden">
   <video id="remote-video" autoplay playsinline></video>
+  <button class="icon-btn call-min" id="call-min-btn" title="Minimize call"><svg viewBox="0 0 24 24"><path d="M12 16.5 4.5 9 6 7.5l6 6 6-6L19.5 9Z"/></svg></button>
+  <div class="mini-info" id="mini-info"><div class="mini-text"><b id="mini-name"></b><span id="mini-time"></span></div><span class="tiny">Tap to return</span><button class="round danger" id="mini-hang" title="End call"><svg viewBox="0 0 24 24"><path d="M12 9c-2.9 0-5.6.6-8 1.7-.5.2-.8.8-.7 1.4l.9 3.3c.1.6.7 1 1.3.9 1.1-.3 2.2-.5 3.4-.6.5 0 .9-.5.9-1v-2.3c.7-.1 1.4-.2 2.2-.2s1.5.1 2.2.2v2.3c0 .5.4 1 .9 1 1.2.1 2.3.3 3.4.6.6.1 1.2-.3 1.3-.9l.9-3.3c.1-.6-.2-1.2-.7-1.4C17.6 9.6 14.9 9 12 9Z"/></svg></button></div>
   <video id="local-video" autoplay playsinline muted class="hidden"></video>
   <div class="call-info">
     <div class="avatar xl" id="call-avatar"></div>
