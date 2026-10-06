@@ -5,7 +5,7 @@ import { Transport, DEFAULT_RELAYS } from './relay.js';
 import { encodeRecoveryKey, decodeRecoveryKey } from './crypto.js';
 import { resolveLogin, setPassword, checkPassword, republishKeystore, RecoveryClient } from './account.js';
 import { Store, settings, session } from './store.js';
-import { App, isGroupId, gidOf } from './app.js';
+import { App, isGroupId, gidOf, profileFp } from './app.js';
 import { CallManager, Tones } from './rtc.js';
 import { PACKS, stickerIds, stickerSvg, animIds, animOf, animHtml } from './stickers.js';
 import { GameManager, GAMES, renderTTT, renderLudo } from './games.js';
@@ -38,6 +38,27 @@ function applyTheme() {
 }
 
 /* ---------------- helpers ---------------- */
+const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+const isPhone = () => window.innerWidth < 860;
+// Run a UI change inside a View Transition (smooth crossfade) when available.
+function withTransition(fn) { if (document.startViewTransition && !reducedMotion()) document.startViewTransition(fn); else fn(); }
+// FLIP: remember where list rows were, then slide them to their new place after a re-render.
+function flipSnap(el) { const m = new Map(); el.querySelectorAll('.item[data-id]').forEach((i) => m.set(i.dataset.id, i.getBoundingClientRect().top)); return m; }
+function flipPlay(el, before) {
+  if (!before.size || reducedMotion()) return;
+  el.querySelectorAll('.item[data-id]').forEach((i) => {
+    const b = before.get(i.dataset.id);
+    if (b === undefined) { i.classList.add('enter'); return; }
+    const d = b - i.getBoundingClientRect().top;
+    if (Math.abs(d) < 2) return;
+    // the row moving up (newest message) floats above the ones it crosses
+    i.style.transition = 'none'; i.style.transform = `translateY(${d}px)`;
+    if (d > 0) { i.style.position = 'relative'; i.style.zIndex = '2'; i.style.background = 'var(--bg)'; }
+    i.getBoundingClientRect();
+    i.style.transition = 'transform .45s var(--ios)'; i.style.transform = '';
+    i.addEventListener('transitionend', () => { i.style.transition = ''; i.style.position = ''; i.style.zIndex = ''; i.style.background = ''; }, { once: true });
+  });
+}
 function toast(msg, type = '') {
   const t = document.createElement('div'); t.className = 'toast ' + type; t.textContent = msg;
   $('toasts').appendChild(t);
@@ -115,10 +136,87 @@ function inviteLink() {
   return location.origin + location.pathname + '#add=' + friendCode(app.pk) + n;
 }
 
-function showModal(html) { $('modal-body').innerHTML = html; $('modal').classList.remove('hidden'); }
-function hideModal() { $('modal').classList.add('hidden'); $('modal-body').innerHTML = ''; stopScanner(); }
+let modalTimer = null;
+function showModal(html) {
+  clearTimeout(modalTimer);
+  const m = $('modal'), body = $('modal-body');
+  m.classList.remove('closing'); body.classList.remove('dragging', 'settle'); body.style.transform = '';
+  body.innerHTML = html; m.classList.remove('hidden');
+}
+function hideModal() {
+  const m = $('modal'), body = $('modal-body');
+  stopScanner();
+  if (m.classList.contains('hidden')) return;
+  if (reducedMotion()) { m.classList.add('hidden'); body.innerHTML = ''; body.style.transform = ''; return; }
+  m.classList.add('closing');
+  clearTimeout(modalTimer);
+  modalTimer = setTimeout(() => { m.classList.add('hidden'); m.classList.remove('closing'); body.innerHTML = ''; body.style.transform = ''; body.classList.remove('dragging', 'settle'); }, 320);
+}
 $('modal').addEventListener('click', (e) => { if (e.target === $('modal')) hideModal(); });
-$('viewer').addEventListener('click', () => $('viewer').classList.add('hidden'));
+// iOS-style sheet: drag down from the top of the sheet to dismiss, spring back otherwise.
+(() => {
+  const body = $('modal-body');
+  let start = null, lastY = 0, lastT = 0, vel = 0, drag = false;
+  body.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.target.closest('canvas, input, textarea, select, video, [data-nodrag]')) return;
+    if (body.scrollTop > 0) return;
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId }; lastY = e.clientY; lastT = performance.now(); vel = 0; drag = false;
+  });
+  body.addEventListener('pointermove', (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    if (!drag) { if (dy > 10 && dy > Math.abs(dx) * 1.3) { drag = true; body.classList.add('dragging'); body.classList.remove('settle'); try { body.setPointerCapture(e.pointerId); } catch {} } else return; }
+    const now = performance.now(); vel = (e.clientY - lastY) / Math.max(1, now - lastT); lastY = e.clientY; lastT = now;
+    const y = dy > 0 ? dy : -Math.pow(-dy, .6);   // rubber-band when pulled up
+    body.style.transform = `translateY(${y}px)`;
+    e.preventDefault();
+  });
+  const end = (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dy = e.clientY - start.y; start = null;
+    if (!drag) return;
+    drag = false; body.classList.remove('dragging');
+    if (dy > 110 || (vel > .6 && dy > 50)) { haptic(8); hideModal(); }
+    else { body.classList.add('settle'); body.style.transform = ''; }
+  };
+  body.addEventListener('pointerup', end); body.addEventListener('pointercancel', end);
+  // Decide on the first finger move: pulling down is ours (no browser scroll -> no pointercancel),
+  // pushing up at the top hands the touch to the browser so the sheet content scrolls.
+  body.addEventListener('touchmove', (e) => {
+    if (!start || e.touches.length !== 1) return;
+    const dy = e.touches[0].clientY - start.y, dx = e.touches[0].clientX - start.x;
+    if (!drag && dy < 0 && -dy > Math.abs(dx)) { start = null; return; }
+    if (drag || dy > 0) e.preventDefault();
+  }, { passive: false });
+})();
+// Photo viewer: zooms out of the tapped thumbnail and back (shared-element style).
+let viewerTimer = null;
+function openViewer(src, fromEl) {
+  clearTimeout(viewerTimer);
+  const v = $('viewer'), im = v.querySelector('img');
+  v.classList.remove('closing'); im.style.transition = 'none'; im.style.transform = ''; im.style.borderRadius = '';
+  im.src = src; v.classList.remove('hidden');
+  if (!fromEl || reducedMotion()) return;
+  const r = fromEl.getBoundingClientRect();
+  const run = () => {
+    const t = im.getBoundingClientRect(); if (!t.width || !t.height) return;
+    im.style.transformOrigin = 'top left';
+    im.style.transform = `translate(${r.left - t.left}px, ${r.top - t.top}px) scale(${r.width / t.width}, ${r.height / t.height})`;
+    im.style.borderRadius = '18px';
+    im.getBoundingClientRect();
+    im.style.transition = 'transform .5s var(--ios), border-radius .5s var(--ios)';
+    im.style.transform = ''; im.style.borderRadius = '0';
+  };
+  if (im.complete && im.naturalWidth) requestAnimationFrame(run); else im.onload = () => requestAnimationFrame(run);
+}
+function closeViewer() {
+  const v = $('viewer'); if (v.classList.contains('hidden')) return;
+  if (reducedMotion()) { v.classList.add('hidden'); return; }
+  v.classList.add('closing');
+  viewerTimer = setTimeout(() => { v.classList.add('hidden'); v.classList.remove('closing'); }, 280);
+}
+$('viewer').addEventListener('click', closeViewer);
 
 function confirmSheet(title, text, okLabel, danger = true) {
   return new Promise((res) => {
@@ -330,8 +428,14 @@ function wireApp() {
     } else if (!atBottom()) { unseen++; updateJump(); }
   });
   app.addEventListener('request', (e) => { if (e.detail.fresh) toast(`New request from ${app.nameOf(e.detail.pk)}`); });
-  app.addEventListener('friend', (e) => { if (e.detail.accepted) { toast(`${app.nameOf(e.detail.pk)} accepted your request`); haptic(); } });
+  app.addEventListener('friend', (e) => {
+    if (e.detail.accepted) { toast(`${app.nameOf(e.detail.pk)} accepted your request`); haptic(); }
+    // name/photo update: redraw lists, header and open chat so the new picture shows right away
+    scheduleRender();
+    if (app.openChat === e.detail.pk) { setAvatar($('chat-avatar'), e.detail.pk); $('chat-name').textContent = app.nameOf(e.detail.pk); renderedFor = null; renderChat(); }
+  });
   app.addEventListener('presence', () => { scheduleRender(); });
+  app.addEventListener('me', () => { scheduleRender(); });
   app.addEventListener('restored', (e) => toast(`Restored ${e.detail.n} friend${e.detail.n === 1 ? '' : 's'} from your encrypted backup`));
   app.addEventListener('media', () => { if (app.openChat) { renderedFor = null; renderChat(); } });
   setInterval(() => { if (app && !document.hidden) { renderChatList(); updateTyping(); } }, 30000);
@@ -378,6 +482,7 @@ function renderChatList() {
     el.innerHTML = `<div class="empty-list"><p>No close friends yet.</p><p class="tiny">Share your invite link or scan a friend's code to start.</p><button class="btn primary" id="empty-add">Add a friend</button></div>`;
     $('empty-add').onclick = openAddFriend; return;
   }
+  const before = flipSnap(el);
   el.innerHTML = items.map(({ id, chat, pending }) => {
     const last = chat.messages[chat.messages.length - 1];
     const plain = last && ['system', 'call', 'game'].includes(last.kind);
@@ -390,12 +495,14 @@ function renderChatList() {
       <div class="preview"><span>${preview}</span>${chat.unread ? `<span class="unread">${chat.unread}</span>` : ''}</div></div></div>`;
   }).join('');
   el.querySelectorAll('.item').forEach((i) => { i.onclick = () => openChat(i.dataset.id); });
+  flipPlay(el, before);
 }
 function renderActiveRow() {
   const el = $('active-row');
   const on = app.friendPks().filter((pk) => app.isOnline(pk)).sort((a, b) => app.nameOf(a).localeCompare(app.nameOf(b)));
   el.classList.toggle('hidden', !on.length);
-  const key = on.join(',');
+  // key includes name + photo so a changed profile picture redraws the row too
+  const key = on.map((pk) => { const f = app.state.friends[pk] || {}; return pk + ':' + profileFp(f.name, f.avatar); }).join(',');
   if (el.dataset.key === key) return;
   el.dataset.key = key;
   el.innerHTML = on.map((pk) => `<button data-id="${pk}" title="${esc(app.nameOf(pk))} is online">${avatarHtml(pk)}<span>${esc(app.nameOf(pk).split(' ')[0])}</span></button>`).join('');
@@ -556,8 +663,8 @@ function renderSettings() {
     settings.set({ recoveryServer: v || null }); rc = new RecoveryClient(v || DEFAULT_RECOVERY_SERVER);
     toast(v ? 'Recovery server saved' : 'Recovery server cleared'); renderSettings(); renderEmailBanner(); if (v) checkRecoveryEmail();
   };
-  el.querySelectorAll('.theme-opt').forEach((b) => { b.onclick = () => { settings.set({ theme: b.dataset.theme }); applyTheme(); renderSettings(); }; });
-  el.querySelectorAll('.swatch').forEach((b) => { b.onclick = () => { settings.set({ accent: b.dataset.accent }); applyTheme(); renderSettings(); }; });
+  el.querySelectorAll('.theme-opt').forEach((b) => { b.onclick = () => withTransition(() => { settings.set({ theme: b.dataset.theme }); applyTheme(); renderSettings(); }); });
+  el.querySelectorAll('.swatch').forEach((b) => { b.onclick = () => withTransition(() => { settings.set({ accent: b.dataset.accent }); applyTheme(); renderSettings(); }); });
   el.querySelectorAll('.switch').forEach((b) => {
     b.onclick = () => {
       const k = b.dataset.set; const cur = k === 'presence' ? settings.get().presence !== false : settings.get()[k]; const v = !cur; settings.set({ [k]: v });
@@ -792,7 +899,9 @@ function loadImage(file) { return new Promise((res, rej) => { const i = new Imag
 /* ---------------- tabs ---------------- */
 document.querySelectorAll('.tabbar button').forEach((b) => {
   b.onclick = () => {
+    if (currentTab !== b.dataset.tab) { b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); haptic(6); }
     currentTab = b.dataset.tab;
+    document.querySelector('.side-body').scrollTop = 0; $('side').classList.remove('compact');
     document.querySelectorAll('.tabbar button').forEach((x) => x.classList.toggle('active', x === b));
     document.querySelectorAll('.tab-pane').forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== currentTab));
     $('side-title').textContent = { chats: 'Chats', friends: 'Friends', calls: 'Calls', requests: 'Requests', settings: 'Settings' }[currentTab];
@@ -800,6 +909,8 @@ document.querySelectorAll('.tabbar button').forEach((b) => {
   };
 });
 $('me-avatar').onclick = () => document.querySelector('.tabbar button[data-tab=settings]').click();
+// Large title shrinks into the bar once the list scrolls (iOS navigation bar).
+document.querySelector('.side-body').addEventListener('scroll', (e) => { $('side').classList.toggle('compact', e.target.scrollTop > 14); }, { passive: true });
 $('add-friend-btn').onclick = () => openAddFriend();
 $('new-group-btn').onclick = () => openNewGroup();
 
@@ -808,11 +919,18 @@ let renderedFor = null;
 let unseen = 0;
 let renderedIds = new Set();
 let renderedChat = null;
+let chatAnimTimer = null;
 function openChat(id) {
   if (!id) return;
   if (app.openChat && app.openChat !== id) app.store.chat(app.openChat).draft = $('input').value;
   app.setOpenChat(id);
   renderedFor = null; replyTo = null; unseen = 0; renderReplyBar();
+  clearTimeout(chatAnimTimer); document.body.classList.remove('chat-closing');
+  $('chat').style.transform = ''; $('side').style.transform = '';
+  if (isPhone() && !document.body.classList.contains('chat-open') && !reducedMotion()) {
+    document.body.classList.add('chat-anim');
+    chatAnimTimer = setTimeout(() => document.body.classList.remove('chat-anim'), 450);
+  }
   document.body.classList.add('chat-open');
   $('chat-empty').classList.add('hidden'); $('chat-inner').classList.remove('hidden');
   $('input').value = app.store.chat(id).draft || '';
@@ -822,14 +940,68 @@ function openChat(id) {
   renderChatList();
   if (window.innerWidth >= 860) $('input').focus();
 }
-function closeChat() {
+function finishCloseChat() {
   if (app.openChat) { app.store.chat(app.openChat).draft = $('input').value; app.store.save(); }
   app.setOpenChat(null);
-  document.body.classList.remove('chat-open');
+  document.body.classList.remove('chat-open', 'chat-closing', 'chat-anim', 'chat-dragging');
+  $('chat').style.transform = ''; $('side').style.transform = '';
   $('chat-empty').classList.remove('hidden'); $('chat-inner').classList.add('hidden');
   renderChatList();
 }
+// Phone: the chat slides off to the right (iOS pop) while the list slides back in.
+function closeChat() {
+  if (!app.openChat || !isPhone() || reducedMotion() || !document.body.classList.contains('chat-open')) return finishCloseChat();
+  clearTimeout(chatAnimTimer);
+  document.body.classList.remove('chat-anim', 'chat-dragging');
+  document.body.classList.add('chat-closing'); document.body.classList.remove('chat-open');
+  chatAnimTimer = setTimeout(finishCloseChat, 380);
+}
 $('back-btn').onclick = closeChat;
+// Interactive swipe-back from the left edge, following the finger (iOS navigation).
+(() => {
+  const chat = $('chat'), side = $('side');
+  let start = null, lastX = 0, lastT = 0, vel = 0, active = false;
+  chat.addEventListener('pointerdown', (e) => {
+    if (!isPhone() || !app || !app.openChat || e.clientX > 28 || e.pointerType === 'mouse') return;
+    start = { x: e.clientX, y: e.clientY, id: e.pointerId }; lastX = e.clientX; lastT = performance.now(); vel = 0; active = false;
+  });
+  chat.addEventListener('pointermove', (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    if (!active) {
+      if (dx > 10 && dx > Math.abs(dy) * 1.5) { active = true; document.body.classList.add('chat-dragging'); try { chat.setPointerCapture(e.pointerId); } catch {} }
+      else if (Math.abs(dy) > 10) { start = null; return; }
+      else return;
+    }
+    const now = performance.now(); vel = (e.clientX - lastX) / Math.max(1, now - lastT); lastX = e.clientX; lastT = now;
+    const x = Math.max(0, dx);
+    chat.style.transform = `translateX(${x}px)`;
+    side.style.transform = `translateX(${-30 + 30 * Math.min(1, x / window.innerWidth)}%)`;
+    e.preventDefault();
+  });
+  const end = (e) => {
+    if (!start || e.pointerId !== start.id) return;
+    const dx = e.clientX - start.x; start = null;
+    if (!active) return;
+    active = false;
+    const w = window.innerWidth;
+    const go = dx > w / 3 || (vel > .45 && dx > 60);
+    chat.style.transition = 'transform .32s var(--ios)'; side.style.transition = 'transform .32s var(--ios)';
+    chat.style.transform = go ? `translateX(${w}px)` : ''; side.style.transform = go ? '' : 'translateX(-30%)';
+    setTimeout(() => {
+      chat.style.transition = ''; side.style.transition = '';
+      if (go) { haptic(8); finishCloseChat(); } else { document.body.classList.remove('chat-dragging'); chat.style.transform = ''; side.style.transform = ''; }
+    }, 330);
+  };
+  chat.addEventListener('pointerup', end); chat.addEventListener('pointercancel', end);
+  // Edge touches are ours unless they turn vertical: stops #messages scrolling from cancelling the gesture.
+  chat.addEventListener('touchmove', (e) => {
+    if (!start || e.touches.length !== 1) return;
+    const dx = e.touches[0].clientX - start.x, dy = e.touches[0].clientY - start.y;
+    if (active || dx > Math.abs(dy)) e.preventDefault();      // horizontal: ours
+    else if (Math.abs(dy) > dx) start = null;                   // vertical: let the list scroll
+  }, { passive: false });
+})();
 
 function atBottom() { const box = $('messages'); return box.scrollHeight - box.scrollTop - box.clientHeight < 80; }
 function updateJump() {
@@ -921,7 +1093,7 @@ function renderChat(scrollToEnd = false) {
     }
     box.innerHTML = html;
     renderedIds = new Set(chat.messages.map((m) => m.id));
-    box.querySelectorAll('img[data-full]').forEach((img) => { img.onclick = () => { $('viewer').querySelector('img').src = img.src; $('viewer').classList.remove('hidden'); }; });
+    box.querySelectorAll('img[data-full]').forEach((img) => { img.onclick = () => openViewer(img.src, img); });
     box.querySelectorAll('[data-resend]').forEach((el) => { el.onclick = () => app.resend(id, el.dataset.resend).catch((e) => toast(e.message, 'error')); });
     box.querySelectorAll('[data-play]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); playVideo(el.dataset.play); }; });
     box.querySelectorAll('.vid video').forEach((el) => { el.onclick = (e) => e.stopPropagation(); });
@@ -1006,12 +1178,14 @@ $('reply-cancel').onclick = () => { replyTo = null; renderReplyBar(); };
 
 (function gestures() {
   const box = $('messages');
-  let startX = 0, startY = 0, el = null, swiping = false, pressTimer = null, moved = false;
+  let startX = 0, startY = 0, el = null, swiping = false, pressTimer = null, moved = false, pressed = false;
   const msgOf = (t) => t.closest && t.closest('.msg');
   box.addEventListener('touchstart', (e) => {
     el = msgOf(e.target); if (!el) return;
-    const t = e.touches[0]; startX = t.clientX; startY = t.clientY; moved = false; swiping = false;
-    pressTimer = setTimeout(() => { if (!moved) { haptic(20); messageMenu(el.dataset.id); } }, 480);
+    const t = e.touches[0]; if (t.clientX <= 28) { el = null; return; }
+    startX = t.clientX; startY = t.clientY; moved = false; swiping = false;
+    pressed = false;
+    pressTimer = setTimeout(() => { if (!moved) { pressed = true; haptic(20); messageMenu(el.dataset.id); } }, 480);
   }, { passive: true });
   box.addEventListener('touchmove', (e) => {
     if (!el) return;
@@ -1022,6 +1196,9 @@ $('reply-cancel').onclick = () => { replyTo = null; renderReplyBar(); };
   }, { passive: true });
   const endSwipe = (e) => {
     clearTimeout(pressTimer);
+    // after a long-press the menu is already under the finger: swallow the synthetic click on release
+    if (pressed && e.cancelable) e.preventDefault();
+    pressed = false;
     if (!el) return;
     if (swiping) {
       const dx = (e.changedTouches ? e.changedTouches[0].clientX : startX) - startX;
@@ -1048,7 +1225,7 @@ async function messageMenu(mid) {
   if (act === 'reply') setReply(mid);
   else if (act === 'copy') { try { await navigator.clipboard.writeText(m.text); toast('Copied'); } catch { toast('Could not copy'); } }
   else if (act === 'watch') startWatch(id, m.text.match(MEDIA_RE)[0]);
-  else if (act === 'view') { $('viewer').querySelector('img').src = m.img; $('viewer').classList.remove('hidden'); }
+  else if (act === 'view') { openViewer(m.img, document.querySelector(`.msg[data-id="${m.id}"] img`)); }
   else if (act === 'save') { const data = await app.getVideo(mid); if (!data) { toast('Video is not on this device'); return; } const a = document.createElement('a'); a.href = data; a.download = `chatly-video.${/webm/.test(m.video.mime) ? 'webm' : 'mp4'}`; a.click(); }
   else if (act === 'delete') { app.deleteLocal(id, mid); renderedFor = null; renderChat(); }
 }

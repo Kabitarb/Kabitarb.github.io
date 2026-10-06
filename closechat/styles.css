@@ -590,3 +590,78 @@ button.avatar, .avatar { padding: 0; border: 0; box-sizing: border-box; }
 /* voice-call mini bar sits above a full-screen game: make room for the game header */
 body.call-mini-voice #game.full { padding-top: calc(66px + var(--safe-top, 0px)); }
 body.call-mini-voice #game.mini { top: calc(62px + var(--safe-top, 0px)); }
+
+
+/* ===== v6: Apple-style motion & UI ===== */
+:root { --ios: cubic-bezier(.32,.72,0,1); --bounce: cubic-bezier(.34,1.45,.64,1); }
+html { -webkit-font-smoothing: antialiased; }
+#main { overflow: hidden; }
+/* press: instant squeeze, springy release */
+.btn, .icon-btn, .round, .tabbar button, .list .item, .swatch, .theme-opt, .avatar-grid button, .picker-body button, .fab, .ttt-cell, .dice, .active-row button, .switch {
+  transition: transform .34s var(--bounce), background-color .22s, color .22s, box-shadow .22s, opacity .22s, border-color .22s;
+}
+.btn:active, .round:active, .fab:active, .swatch:active, .theme-opt:active, .avatar-grid button:active, .picker-body button:active, .ttt-cell.can:active, .dice.can:active, .icon-btn:active, .active-row button:active {
+  transform: scale(.92); transition-duration: .08s; transition-timing-function: ease-out;
+}
+.list .item:active { transform: scale(.985); background: var(--bg3); transition-duration: .08s; }
+.list .item.enter { animation: rowin .4s var(--ios); }
+@keyframes rowin { from { opacity: 0; transform: translateY(-8px) } }
+@media (hover: hover) { .fab:hover { transform: translateY(-2px) scale(1.04); } .btn.primary:hover { filter: brightness(1.06); } }
+/* iOS toggle: knob stretches while pressed, springs into place */
+.switch::after { transition: left .3s var(--bounce), width .18s var(--ios); }
+.switch:active::after { width: 26px; }
+.switch.on:active::after { left: 17px; }
+/* tab bar: icon pops when selected, pane settles in */
+.tabbar button.pop svg { animation: tabpop .5s var(--bounce); }
+@keyframes tabpop { 0% { transform: scale(1) } 40% { transform: scale(1.22) translateY(-3px) } 100% { transform: translateY(-1px) } }
+.tab-pane { animation: pane .4s var(--ios); }
+@keyframes pane { from { opacity: 0; transform: translateY(10px) scale(.99) } }
+/* large title collapses into the bar on scroll */
+.side-header h2 { font-size: 30px; letter-spacing: -.6px; transform-origin: left center; transition: font-size .3s var(--ios), letter-spacing .3s var(--ios); }
+#side.compact .side-header h2 { font-size: 20px; letter-spacing: -.3px; }
+.side-header { transition: box-shadow .3s var(--ios), background-color .3s; }
+#side.compact .side-header { box-shadow: 0 1px 0 var(--line); }
+/* chat push / pop (phone) with parallax of the list underneath */
+@media (max-width: 859px) {
+  #chat { touch-action: pan-y; }
+  body.chat-open #chat { animation: pushin .45s var(--ios); box-shadow: -14px 0 32px rgba(0,0,0,.28); position: relative; z-index: 6; }
+  @keyframes pushin { from { transform: translateX(100%) } }
+  body.chat-open.chat-anim #side, body.chat-open.chat-dragging #side { display: flex; position: absolute; inset: 0; z-index: 1; pointer-events: none; }
+  body.chat-open.chat-anim #side { animation: pushout .45s var(--ios) forwards; }
+  @keyframes pushout { from { transform: translateX(0); filter: brightness(1) } to { transform: translateX(-30%); filter: brightness(.72) } }
+  body.chat-open.chat-dragging #side { transform: translateX(-30%); filter: brightness(.8); }
+  body.chat-dragging #chat { animation: none !important; }
+  body.chat-closing #chat { display: flex; position: absolute; inset: 0; z-index: 6; animation: popout .38s var(--ios) forwards; box-shadow: -14px 0 32px rgba(0,0,0,.28); }
+  @keyframes popout { to { transform: translateX(100%) } }
+  body.chat-closing #side { animation: popback .38s var(--ios); }
+  @keyframes popback { from { transform: translateX(-30%); filter: brightness(.72) } }
+  body.chat-closing .fab { display: none; }
+}
+/* sheets: slide up on the iOS curve, grabber, drag-to-dismiss, animated close */
+#modal { background: rgba(0,0,0,.42); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); animation: fadein .3s var(--ios); transition: opacity .3s var(--ios); }
+@keyframes fadein { from { opacity: 0 } }
+#modal.closing { opacity: 0; pointer-events: none; }
+.sheet { animation: sheetup .5s var(--ios); will-change: transform; touch-action: pan-y; }
+.sheet::before { content: ''; display: block; width: 36px; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--fg2) 45%, transparent); margin: -6px auto 12px; }
+@media (min-width: 860px) { #modal { align-items: center; } .sheet { border-radius: 22px; } .sheet::before { display: none; } }
+.sheet.dragging { animation: none; transition: none; }
+.sheet.settle { transition: transform .45s var(--bounce); }
+#modal.closing .sheet { animation: sheetdown .32s var(--ios) forwards; }
+@keyframes sheetdown { to { transform: translateY(110%); opacity: .6 } }
+@media (min-width: 860px) { #modal.closing .sheet { animation: sheetaway .25s var(--ios) forwards; } @keyframes sheetaway { to { transform: scale(.96) translateY(10px); opacity: 0 } } }
+/* panels (games / watch / call activity) & emoji picker */
+.panel { animation: up .45s var(--ios); }
+.picker { animation: up .4s var(--ios); }
+@keyframes up { from { transform: translateY(100%); opacity: 1 } }
+/* photo viewer: shared-element zoom handled in JS, fade on close */
+#viewer { animation: fadein .25s var(--ios); transition: opacity .28s var(--ios); }
+#viewer img { border-radius: 0; }
+#viewer.closing { opacity: 0; }
+#viewer.closing img { transition: transform .28s var(--ios) !important; transform: scale(.9) !important; }
+/* toasts: iOS pill dropping in */
+.toast { animation: toastin .5s var(--bounce); }
+/* bubbles: springy entrance */
+.msg.anim { animation: bubble .42s var(--bounce); }
+/* theme change: crossfade via View Transitions */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .35s; animation-timing-function: var(--ios); }
+@media (prefers-reduced-motion: reduce) { .sheet::before { display: block; } }
