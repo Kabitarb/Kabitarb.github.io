@@ -107,6 +107,10 @@ body.chat-open #chat { display: flex; }
 .list .item .actions { display: flex; gap: 6px; flex: none; }
 .list .call-icon { color: var(--fg2); }
 .list .call-icon.missed { color: var(--danger); }
+.friends-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px 4px; font-size: 13px; }
+.list-h4 { padding: 14px 14px 4px; font-size: 13px; text-transform: uppercase; }
+#friend-list .item .actions { display: flex; gap: 2px; }
+#friend-list .item .actions .icon-btn svg { width: 20px; height: 20px; }
 .empty-list { padding: 50px 24px; text-align: center; color: var(--fg2); }
 .empty-list .btn { margin-top: 14px; }
 

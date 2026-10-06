@@ -258,7 +258,7 @@ function scheduleRender() { if (renderTimer) return; renderTimer = requestAnimat
 function renderAll() {
   if (!app) return;
   setAvatar($('me-avatar'), app.pk);
-  renderChatList(); renderCalls(); renderRequests(); renderSettings();
+  renderChatList(); renderFriends(); renderCalls(); renderRequests(); renderSettings();
   if (app.openChat) renderChat();
   const pending = Object.values(app.state.friends).filter((f) => f.status === 'request').length;
   const b = $('req-badge'); b.textContent = pending; b.classList.toggle('hidden', !pending);
@@ -291,13 +291,45 @@ function renderChatList() {
   }).join('');
   el.querySelectorAll('.item').forEach((i) => { i.onclick = () => openChat(i.dataset.id); });
 }
+$('friend-search').oninput = () => renderFriends();
 $('chat-search').oninput = renderChatList;
 
+const CHAT_SVG = '<svg viewBox="0 0 24 24"><path d="M12 3C6.5 3 2 6.9 2 11.7c0 2.5 1.2 4.7 3.2 6.3L4.5 21l3.6-1.9c1.2.4 2.5.6 3.9.6 5.5 0 10-3.9 10-8.7S17.5 3 12 3Z"/></svg>';
 const PHONE_SVG = '<svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02Z"/></svg>';
 const VIDEO_SVG = '<svg viewBox="0 0 24 24"><path d="M3 6h12a2 2 0 0 1 2 2v2.5l4-2.5v8l-4-2.5V16a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/></svg>';
 function callLabel(c) {
   return `${c.dir === 'in' ? (c.reason === 'declined' ? 'Declined' : c.missed ? 'Missed' : 'Incoming') : c.reason === 'declined' ? 'Outgoing (declined)' : c.reason === 'no-answer' ? 'Outgoing (no answer)' : 'Outgoing'} ${c.video ? 'video' : 'voice'} call${c.dur ? ' · ' + fmtDur(c.dur) : ''}`;
 }
+function renderFriends() {
+  const el = $('friend-list');
+  const q = ($('friend-search').value || '').trim().toLowerCase();
+  const friends = Object.entries(app.state.friends).filter(([, f]) => f.status === 'friend')
+    .map(([pk, f]) => ({ pk, since: f.since || 0, name: app.nameOf(pk) }))
+    .filter((f) => !q || f.name.toLowerCase().includes(q))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const groups = Object.entries(app.state.groups || {}).filter(([, g]) => g.members.includes(app.pk))
+    .map(([gid, g]) => ({ id: 'g:' + gid, name: g.name || 'Group', n: g.members.length }))
+    .filter((g) => !q || g.name.toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+  let html = `<div class="friends-head"><span class="muted">${friends.length} close friend${friends.length === 1 ? '' : 's'}</span><button class="btn primary small" id="fl-add">+ Add friend</button></div>`;
+  if (!friends.length) html += `<div class="empty-list"><p>${q ? 'No friends match.' : 'No close friends yet.'}</p><p class="tiny">Share your code or invite link, or add a friend by username.</p></div>`;
+  html += friends.map((f) => `<div class="item" data-pk="${f.pk}">${avatarHtml(f.pk)}
+    <div class="body"><div class="name">${esc(f.name)}</div><div class="preview"><span>${f.since ? 'Friends since ' + new Date(f.since).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : 'Close friend'}</span></div></div>
+    <div class="actions"><button class="icon-btn" data-act="msg" title="Message">${CHAT_SVG}</button><button class="icon-btn" data-act="call" title="Voice call">${PHONE_SVG}</button><button class="icon-btn" data-act="video" title="Video call">${VIDEO_SVG}</button></div></div>`).join('');
+  if (groups.length) html += `<h4 class="muted list-h4">Groups</h4>` + groups.map((g) => `<div class="item" data-pk="${g.id}">${avatarHtml(g.id)}<div class="body"><div class="name">${esc(g.name)}</div><div class="preview"><span>${g.n} members</span></div></div></div>`).join('');
+  el.innerHTML = html;
+  $('fl-add').onclick = () => openAddFriend('me');
+  el.querySelectorAll('.item').forEach((i) => {
+    const pk = i.dataset.pk;
+    i.onclick = (e) => {
+      const act = e.target.closest('[data-act]')?.dataset.act;
+      if (act === 'call') startCall(pk, false);
+      else if (act === 'video') startCall(pk, true);
+      else openChat(pk);
+    };
+    i.oncontextmenu = (e) => { if (isGroupId(pk)) return; e.preventDefault(); openChat(pk); setTimeout(() => $('chat-menu-btn')?.click(), 50); };
+  });
+}
+
 function renderCalls() {
   const el = $('call-list');
   const log = app.state.calls;
@@ -433,7 +465,7 @@ document.querySelectorAll('.tabbar button').forEach((b) => {
     currentTab = b.dataset.tab;
     document.querySelectorAll('.tabbar button').forEach((x) => x.classList.toggle('active', x === b));
     document.querySelectorAll('.tab-pane').forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== currentTab));
-    $('side-title').textContent = { chats: 'Chats', calls: 'Calls', requests: 'Requests', settings: 'Settings' }[currentTab];
+    $('side-title').textContent = { chats: 'Chats', friends: 'Friends', calls: 'Calls', requests: 'Requests', settings: 'Settings' }[currentTab];
   };
 });
 $('me-avatar').onclick = () => document.querySelector('.tabbar button[data-tab=settings]').click();
