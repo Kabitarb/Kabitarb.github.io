@@ -228,11 +228,13 @@ export class Tones {
   startRing(incoming) {
     this.stop();
     const pattern = () => {
-      if (incoming) { this.beep(880, 0.25); this.beep(660, 0.25, 0.08, 0.3); this.beep(880, 0.25, 0.08, 0.6); }
-      else { this.beep(440, 1.0, 0.05); this.beep(480, 1.0, 0.05); }
+      if (incoming) {
+        // classic two-tone trill: ~1 s ringing, ~1.5 s pause
+        for (let i = 0; i < 8; i++) this.beep(i % 2 ? 988 : 784, 0.11, 0.22, i * 0.125);
+      } else { this.beep(440, 1.0, 0.07); this.beep(480, 1.0, 0.07); }
     };
     try { pattern(); } catch {}
-    this.timer = setInterval(() => { try { pattern(); } catch {} }, incoming ? 2000 : 3000);
+    this.timer = setInterval(() => { try { pattern(); } catch {} }, incoming ? 2500 : 3000);
   }
   notify() { try { this.beep(1200, 0.08, 0.05); this.beep(1600, 0.08, 0.05, 0.1); } catch {} }
   stop() { clearInterval(this.timer); this.timer = null; }

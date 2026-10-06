@@ -1,5 +1,5 @@
 import { SimplePool } from 'nostr-tools/pool';
-import { WRAP_KIND, EPHEMERAL_WRAP_KIND } from './crypto.js';
+import { WRAP_KIND, EPHEMERAL_WRAP_KIND, DIRECTORY_KIND, directoryTag, verifyEvent } from './crypto.js';
 
 export const DEFAULT_RELAYS = [
   'wss://nostr.mom',
@@ -65,6 +65,23 @@ export class Transport {
       throw new Error(reason);
     }
     return ok;
+  }
+
+  // Find accounts that published a directory pointer for this username.
+  async lookup(username) {
+    const tag = directoryTag(username);
+    const evs = await this.pool.querySync(this.relays, { kinds: [DIRECTORY_KIND], '#d': [tag] }, { maxWait: 6000 });
+    const byPk = new Map();
+    for (const ev of evs) {
+      if (!verifyEvent(ev)) continue;
+      let c = null;
+      if (ev.content) { try { c = JSON.parse(ev.content); } catch { continue; } if (c.u !== tag.slice('closechat:user:'.length)) continue; }
+      const prev = byPk.get(ev.pubkey);
+      // keep the newest record per identity; an empty one means "removed"
+      if (!prev || prev.created_at < ev.created_at) byPk.set(ev.pubkey, { pk: ev.pubkey, name: c ? c.n || '' : '', created_at: ev.created_at, removed: !c });
+    }
+    for (const [pk, r] of byPk) if (r.removed) byPk.delete(pk);
+    return [...byPk.values()].sort((a, b) => a.created_at - b.created_at);
   }
 
   close() {

@@ -1,6 +1,6 @@
 {
-  "name": "CloseChat",
-  "short_name": "CloseChat",
+  "name": "Chatly",
+  "short_name": "Chatly",
   "description": "Private, end-to-end encrypted messaging and calls for your close friends only.",
   "start_url": "./",
   "scope": "./",

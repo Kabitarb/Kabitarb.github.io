@@ -36,11 +36,13 @@ async function kvDel(key) {
 
 export function emptyState() {
   return {
-    version: 1,
-    profile: { name: '', avatar: '' },
+    version: 2,
+    profile: { name: '', avatar: '', username: '' },
     friends: {},        // pk -> { name, avatar, status: 'friend'|'request'|'blocked', since }
-    chats: {},          // pk -> { messages: [], unread: 0, lastTs: 0, draft: '' }
+    groups: {},         // gid -> { name, members: [pk], admin, since, ts }
+    chats: {},          // id (pk or 'g:'+gid) -> { messages: [], unread: 0, lastTs: 0, draft: '' }
     calls: [],          // { id, peer, dir: 'in'|'out', video, ts, dur, missed }
+    games: {},          // gameId -> serialized game session
     lastSync: 0,        // newest wrap created_at we have processed
     seenRumors: [],
   };
@@ -87,8 +89,8 @@ export class Store {
 // Device-level settings (theme etc.) are not secret and live in localStorage.
 export const settings = {
   get() {
-    try { return Object.assign({ theme: 'dark', accent: 'blue', relays: null, notifications: true, sounds: true }, JSON.parse(localStorage.getItem('closechat:settings') || '{}')); }
-    catch { return { theme: 'dark', accent: 'blue', relays: null, notifications: true, sounds: true }; }
+    try { return Object.assign({ theme: 'dark', accent: 'blue', relays: null, notifications: true, sounds: true, discoverable: true, haptics: true }, JSON.parse(localStorage.getItem('closechat:settings') || '{}')); }
+    catch { return { theme: 'dark', accent: 'blue', relays: null, notifications: true, sounds: true, discoverable: true, haptics: true }; }
   },
   set(patch) { localStorage.setItem('closechat:settings', JSON.stringify(Object.assign(this.get(), patch))); },
 };
