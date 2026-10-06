@@ -263,7 +263,7 @@ function renderAll() {
   const pending = Object.values(app.state.friends).filter((f) => f.status === 'request').length;
   const b = $('req-badge'); b.textContent = pending; b.classList.toggle('hidden', !pending);
   const totalUnread = Object.entries(app.state.chats).filter(([id]) => app.canChat(id)).reduce((a, [, c]) => a + c.unread, 0);
-  document.title = (totalUnread ? `(${totalUnread}) ` : '') + 'CloseChat';
+  document.title = (totalUnread ? `(${totalUnread}) ` : '') + 'Chatly';
 }
 
 function renderChatList() {
@@ -407,7 +407,7 @@ function renderSettings() {
       <div class="srow clickable" id="s-logout"><span>Log out</span><span class="muted">Keeps encrypted history</span></div>
       <div class="srow clickable" id="s-wipe"><span class="danger">Delete all data on this device</span></div>
     </div>
-    <p class="tiny muted" style="margin-top:16px">CloseChat v2.0 · No servers, no phone number. Your password is your key — there is no way to reset it.</p>`;
+    <p class="tiny muted" style="margin-top:16px">Chatly v2.1 · No servers, no phone number. Your password is your key — there is no way to reset it.</p>`;
   el.querySelector('.profile .avatar').onclick = async () => {
     const act = await menuSheet([{ id: 'pick', label: 'Choose photo' }, ...(p.avatar ? [{ id: 'remove', label: 'Remove photo', danger: true }] : [])]);
     if (act === 'pick') $('avatar-input').click();
@@ -859,7 +859,7 @@ function openAddFriend(tab = 'me') {
   $('modal-body').querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => { stopScanner(); openAddFriend(b.dataset.t); }; });
   $('copy-code').onclick = async () => { try { await navigator.clipboard.writeText(code); toast('Code copied'); } catch { toast('Select and copy the code above'); } };
   $('share-link').onclick = async () => {
-    if (navigator.share) { navigator.share({ title: 'Add me on CloseChat', text: `Add me on CloseChat — private chats & calls for close friends.`, url: link }).catch(() => {}); }
+    if (navigator.share) { navigator.share({ title: 'Add me on Chatly', text: `Add me on Chatly — private chats & calls for close friends.`, url: link }).catch(() => {}); }
     else { try { await navigator.clipboard.writeText(link); toast('Invite link copied'); } catch { showModal(`<h3>Invite link</h3><div class="code">${esc(link)}</div>`); } }
   };
   const doAdd = (raw, name) => {
