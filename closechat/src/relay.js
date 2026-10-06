@@ -92,6 +92,15 @@ export class Transport {
     return best;
   }
 
+  // Every keystore published under this username tag (any author); the caller
+  // tries to open each with the password-derived key.
+  async fetchKeystores(tag) {
+    const evs = await this.pool.querySync(this.relays, { kinds: [DIRECTORY_KIND], '#d': [tag] }, { maxWait: 7000 });
+    const byPk = new Map();
+    for (const ev of evs) if (verifyEvent(ev) && (!byPk.has(ev.pubkey) || byPk.get(ev.pubkey).created_at < ev.created_at)) byPk.set(ev.pubkey, ev);
+    return [...byPk.values()];
+  }
+
   close() {
     if (this.sub) this.sub.close();
     clearInterval(this._statusTimer);

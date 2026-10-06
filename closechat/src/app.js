@@ -9,6 +9,13 @@ const MAX_GROUP = 16;
 const CHUNK = 30000;            // chars of base64 per relay event (fits the ~48 KB payload limit)
 const MAX_VIDEO = 1600000;      // data-URL chars, ~1.2 MB of video
 const PRESENCE_EVERY = 50000;
+// Short fingerprint of a name + photo so friends can tell when theirs is stale.
+export function profileFp(name, avatar) {
+  const str = (name || '') + '|' + (avatar || '');
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h * 33) ^ str.charCodeAt(i)) >>> 0;
+  return h.toString(16) + str.length.toString(36);
+}
 const ONLINE_WINDOW = 125000;
 const isMessageKind = (k) => k === KIND_TEXT || k === KIND_IMAGE || k === KIND_STICKER || k === KIND_VIDEO;
 
@@ -31,6 +38,7 @@ export class App extends EventTarget {
     this.pendingGroup = {};   // gid -> rumors that arrived before the group sync
     this.ready = false;
     this.presence = {};       // pk -> last heartbeat ms (not persisted)
+    this.profileAsked = {};   // pk -> last time we asked them to re-send their profile
     this.sharePresence = true;
     this.lastBackupFp = '';
     this.backupTimer = null;
@@ -58,6 +66,7 @@ export class App extends EventTarget {
   isFriend(pk) { const f = this.state.friends[pk]; return !!f && f.status === 'friend'; }
   isPending(pk) { const f = this.state.friends[pk]; return !!f && f.status === 'pending'; }
   friendPks() { return Object.entries(this.state.friends).filter(([, f]) => f.status === 'friend').map(([pk]) => pk); }
+  profileFp() { return profileFp(this.state.profile.name, this.state.profile.avatar); }
   isOnline(pk) { return Date.now() - (this.presence[pk] || 0) < ONLINE_WINDOW; }
   lastSeen(pk) { const f = this.state.friends[pk]; return Math.max((f && f.lastSeen) || 0, this.presence[pk] || 0); }
   touch(pk) { if (pk === this.pk || !this.state.friends[pk]) return; this.presence[pk] = Date.now(); this.state.friends[pk].lastSeen = Date.now(); }
@@ -208,9 +217,14 @@ export class App extends EventTarget {
       else if (f.status !== 'friend') f.status = f.status === 'request' ? 'friend' : 'pending';
       this.store.chat(to);
     } else if (c.t === 'profile') {
-      if (c.name) this.state.profile.name = String(c.name).slice(0, 40);
-      if (c.av !== undefined) this.state.profile.avatar = c.av || '';
-      if (c.u) this.state.profile.username = c.u;
+      // Relays replay our old profile copies in any order: only apply newer ones.
+      const p = this.state.profile;
+      if ((c.name || c.av !== undefined) && rumor.created_at < (p.ts || 0)) return;
+      if (c.name) p.name = String(c.name).slice(0, 40);
+      if (c.av !== undefined) p.avatar = c.av || '';
+      if (c.name || c.av !== undefined) p.ts = rumor.created_at;
+      if (c.u) p.username = c.u;
+      this.emit('me');
     } else if (c.t === 'block' && c.pk) {
       const f = this.state.friends[c.pk] || (this.state.friends[c.pk] = { name: '', since: Date.now() });
       f.status = c.on ? 'blocked' : 'friend';
@@ -256,8 +270,11 @@ export class App extends EventTarget {
       }
       case 'friend': {
         const f = this.state.friends[from] || (this.state.friends[from] = { name: '', status: 'request', since: Date.now() });
-        if (c.name) f.name = String(c.name).slice(0, 40);
-        if (typeof c.av === 'string' && c.av.length < 20000) f.avatar = c.av;
+        if (rumor.created_at >= (f.pts || 0)) {
+          if (c.name) f.name = String(c.name).slice(0, 40);
+          if (typeof c.av === 'string' && c.av.length < 20000) f.avatar = c.av;
+          f.pts = rumor.created_at;
+        }
         if (c.a === 'accept') {
           if (f.status === 'request' || f.status === 'pending' || f.status === 'contact') { f.status = 'friend'; f.since = Date.now(); }
           this.touch(from);
@@ -275,8 +292,12 @@ export class App extends EventTarget {
       case 'profile': {
         const f = this.state.friends[from];
         if (!f) return;
-        if (c.name) f.name = String(c.name).slice(0, 40);
-        if (typeof c.av === 'string' && c.av.length < 20000) f.avatar = c.av;
+        // Old copies can be replayed after newer ones; keep the newest only.
+        if (rumor.created_at >= (f.pts || 0)) {
+          if (c.name) f.name = String(c.name).slice(0, 40);
+          if (typeof c.av === 'string' && c.av.length < 20000) f.avatar = c.av;
+          f.pts = rumor.created_at;
+        }
         if (c.req && this.knows(from)) this.sendControl(from, { t: 'profile', name: this.state.profile.name, av: this.state.profile.avatar });
         this.emit('friend', { pk: from });
         break;
@@ -294,6 +315,13 @@ export class App extends EventTarget {
         const f = this.state.friends[from];
         if (c.on) { this.presence[from] = Date.now(); f.lastSeen = Date.now(); if (c.q) this.sendPresence([from], false); }
         else { this.presence[from] = 0; f.lastSeen = Date.now(); }
+        // Their name/photo changed while we were offline (or the relay dropped
+        // the profile event): ask for a fresh copy, at most once per few minutes.
+        if (typeof c.ah === 'string' && c.ah !== profileFp(f.name, f.avatar) && Date.now() - (this.profileAsked[from] || 0) > 4 * 60000) {
+          this.profileAsked[from] = Date.now();
+          const p = this.state.profile;
+          this.sendControl(from, { t: 'profile', name: p.name, av: p.avatar, req: 1 });
+        }
         this.emit('presence', { pk: from });
         break;
       }
@@ -666,11 +694,13 @@ export class App extends EventTarget {
   }
   setName(name) {
     this.state.profile.name = name.trim().slice(0, 40);
+    this.state.profile.ts = Math.floor(Date.now() / 1000);
     this.store.save();
     this.broadcastProfile();
   }
   setAvatar(dataUrl) {
     this.state.profile.avatar = dataUrl || '';
+    this.state.profile.ts = Math.floor(Date.now() / 1000);
     this.store.save();
     this.broadcastProfile();
   }
@@ -697,7 +727,7 @@ export class App extends EventTarget {
     if (!this.sharePresence && !off) return;
     const targets = pks || this.friendPks();
     if (!targets.length) return;
-    const obj = { t: 'presence', on: off ? 0 : 1 };
+    const obj = { t: 'presence', on: off ? 0 : 1, ah: this.profileFp() };
     if (query && !off) obj.q = 1;
     this.sendToMany(targets, obj, true, false);
   }
@@ -715,7 +745,7 @@ export class App extends EventTarget {
     for (const [pk, f] of Object.entries(this.state.friends)) if (['friend', 'pending', 'blocked', 'request'].includes(f.status)) friends[pk] = { n: f.name || '', s: f.status, t: f.since || 0 };
     for (const [gid, g] of Object.entries(this.state.groups)) if (g.members.includes(this.pk)) groups[gid] = { n: g.name, m: g.members, a: g.admin, t: g.since || 0, ts: g.ts || 0 };
     const p = this.state.profile;
-    return { v: 1, profile: { name: p.name || '', username: p.username || '' }, friends, groups };
+    return { v: 1, profile: { name: p.name || '', username: p.username || '', re: p.recoveryEmail || '', av: p.avatar || '', ts: p.ts || 0 }, friends, groups };
   }
   checkBackup() {
     if (!this.ready) return;
@@ -757,7 +787,13 @@ export class App extends EventTarget {
       if (q) for (const rr of q) this.handleRumor(rr);
     }
     const p = this.state.profile;
-    if (b.profile) { if ((!p.name || p.name === 'Me') && b.profile.name) p.name = String(b.profile.name).slice(0, 40); if (!p.username && b.profile.username) p.username = b.profile.username; }
+    if (b.profile) {
+      if ((!p.name || p.name === 'Me') && b.profile.name) p.name = String(b.profile.name).slice(0, 40);
+      if (!p.username && b.profile.username) p.username = b.profile.username;
+      if (!p.recoveryEmail && b.profile.re) p.recoveryEmail = String(b.profile.re).slice(0, 254);
+      if (typeof b.profile.av === 'string' && b.profile.av.length < 20000 && (Number(b.profile.ts) || 0) >= (p.ts || 0)) { p.avatar = b.profile.av; p.ts = Number(b.profile.ts) || p.ts || 0; }
+      this.emit('me');
+    }
     this.lastBackupFp = JSON.stringify(this.backupSnapshot());
     if (added.length) {
       this.store.save();
