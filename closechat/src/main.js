@@ -1297,6 +1297,19 @@ $('reply-cancel').onclick = () => { replyTo = null; renderReplyBar(); };
   };
   box.addEventListener('touchend', endSwipe); box.addEventListener('touchcancel', endSwipe);
   box.addEventListener('contextmenu', (e) => { const m = msgOf(e.target); if (m) { e.preventDefault(); messageMenu(m.dataset.id); } });
+  // mouse long-press (desktop): hold ~0.5s without moving -> same menu as touch long-press / right-click
+  let mTimer = null, mEl = null, mX = 0, mY = 0, mFired = false;
+  box.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    mEl = msgOf(e.target); if (!mEl) return;
+    mX = e.clientX; mY = e.clientY; mFired = false;
+    clearTimeout(mTimer);
+    mTimer = setTimeout(() => { mFired = true; messageMenu(mEl.dataset.id); }, 480);
+  });
+  box.addEventListener('pointermove', (e) => { if (mTimer && e.pointerType === 'mouse' && (Math.abs(e.clientX - mX) > 6 || Math.abs(e.clientY - mY) > 6)) { clearTimeout(mTimer); mTimer = null; } });
+  const mEnd = (e) => { if (e.pointerType !== 'mouse') return; clearTimeout(mTimer); mTimer = null; };
+  box.addEventListener('pointerup', mEnd); box.addEventListener('pointercancel', mEnd); box.addEventListener('pointerleave', mEnd);
+  box.addEventListener('click', (e) => { if (mFired) { mFired = false; e.stopPropagation(); e.preventDefault(); } }, true);
   box.addEventListener('dblclick', (e) => { const m = msgOf(e.target); if (m && window.innerWidth >= 860) setReply(m.dataset.id); });
 })();
 
