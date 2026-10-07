@@ -8,12 +8,13 @@ import { Store, settings, session } from './store.js';
 import { App, isGroupId, gidOf, profileFp } from './app.js';
 import { CallManager, Tones } from './rtc.js';
 import { PACKS, stickerIds, stickerSvg, animIds, animOf, animHtml } from './stickers.js';
-import { GameManager, GAMES, renderTTT, renderLudo } from './games.js';
+import { GameManager, GAMES, renderTTT, renderLudo, ludoXY } from './games.js';
+import { ShareManager } from './share.js';
 import { WatchManager, parseMedia, MEDIA_RE } from './watch.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-let app = null, calls = null, games = null, watch = null, transport = null, store = null;
+let app = null, calls = null, games = null, watch = null, share = null, transport = null, store = null;
 // Owner: set this to your deployed recovery server (see server/README.md) so
 // every user gets "Forgot password by email"; users can override in Settings.
 const DEFAULT_RECOVERY_SERVER = '';
@@ -234,6 +235,25 @@ function promptSheet(title, value, placeholder, hint = '') {
     i.onkeydown = (e) => { if (e.key === 'Enter') $('p-ok').click(); };
   });
 }
+const RX_MORE = ['❤️', '😂', '😮', '😢', '😡', '👍', '👎', '🔥', '🎉', '👏', '🙏', '💯', '😍', '🥰', '😘', '😎', '🤔', '🙄', '😴', '🤣', '😅', '😭', '🥺', '😤', '🤯', '🥳', '🤩', '😇', '💀', '👀', '💪', '🫶', '💔', '✨', '⭐', '🌟', '🍕', '☕', '🎮', '🎲'];
+function reactionMenu(items, mine, onReact) {
+  return new Promise((res) => {
+    showModal(`<div class="rx-bar">${QUICK_RX.map((e) => `<button type="button" data-rx="${e}" class="${mine === e ? 'on' : ''}">${e}</button>`).join('')}<button type="button" data-rx="+" class="more">+</button></div>
+      <div class="menu">${items.map((it) => `<button data-mi="${it.id}" class="${it.danger ? 'danger' : ''}">${esc(it.label)}</button>`).join('')}<button data-mi="">Cancel</button></div>`);
+    const body = $('modal-body');
+    const bind = () => {
+      body.querySelectorAll('[data-rx]').forEach((b) => {
+        b.onclick = () => {
+          const e = b.dataset.rx;
+          if (e === '+') { body.querySelector('.rx-bar').outerHTML = `<div class="rx-grid">${RX_MORE.map((x) => `<button type="button" data-rx="${x}" class="${mine === x ? 'on' : ''}">${x}</button>`).join('')}</div>`; bind(); return; }
+          haptic(); hideModal(); onReact(e); res(null);
+        };
+      });
+      body.querySelectorAll('[data-mi]').forEach((b) => { b.onclick = () => { hideModal(); res(b.dataset.mi || null); }; });
+    };
+    bind();
+  });
+}
 function menuSheet(items) {
   // items: [{ id, label, danger }]
   return new Promise((res) => {
@@ -286,29 +306,32 @@ $('signup-form').onsubmit = async (e) => {
 };
 
 /* ---------------- forgot password ---------------- */
-let forgot = { mode: 'email', stage: 'start', sk: null };
+let forgot = { mode: 'key', stage: 'start', sk: null };
 function showAuthForm(id) { ['login-form', 'signup-form', 'forgot-form'].forEach((f) => $(f).classList.toggle('hidden', f !== id)); }
-function resetForgot() {
-  forgot = { mode: 'email', stage: 'start', sk: null };
-  $('forgot-form').reset();
-  $('forgot-mode').querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.m === 'email'));
-  $('forgot-email-step').classList.remove('hidden'); $('forgot-key-step').classList.add('hidden');
+function setForgotMode(mode) {
+  forgot.mode = mode; forgot.stage = 'start'; forgot.sk = null;
+  $('forgot-key-step').classList.toggle('hidden', mode !== 'key');
+  $('forgot-email-step').classList.toggle('hidden', mode !== 'email');
   $('forgot-new').classList.add('hidden'); $('forgot-code-row').classList.add('hidden');
+  $('forgot-hint').textContent = mode === 'key' ? 'Paste the recovery link (or key) you saved from Settings. No email needed.' : 'We email a 6-digit code to the recovery email you verified in Settings.';
+  $('forgot-use-email').textContent = mode === 'key' ? 'Use recovery email instead' : 'Use recovery link instead';
+  $('forgot-use-email').classList.toggle('hidden', !rc.enabled);
+  $('forgot-send').textContent = 'Send code';
   $('forgot-submit').textContent = 'Continue'; $('forgot-error').textContent = '';
-  $('forgot-email').placeholder = rc.enabled ? 'Recovery email' : 'Recovery email (no recovery server configured)';
+}
+function resetForgot() { $('forgot-form').reset(); setForgotMode('key'); }
+// Recovery link = this app's address + the recovery key, so one tap/paste resets the password.
+function recoveryLink(key, u) { return `${location.origin}${location.pathname}#recover=${encodeURIComponent(key)}&u=${encodeURIComponent(u || '')}`; }
+function parseRecoveryInput(str) {
+  const t = String(str || '').trim();
+  const m = t.match(/#recover=([^&\s]+)(?:&u=([^&\s]+))?/);
+  if (!m) return { key: t, u: '' };
+  let key = m[1], u = ''; try { key = decodeURIComponent(m[1]); u = decodeURIComponent(m[2] || ''); } catch {}
+  return { key, u };
 }
 $('show-forgot').onclick = (e) => { e.preventDefault(); resetForgot(); showAuthForm('forgot-form'); $('forgot-user').value = $('login-user').value; };
 $('forgot-back').onclick = (e) => { e.preventDefault(); showAuthForm('login-form'); };
-$('forgot-mode').querySelectorAll('button').forEach((b) => {
-  b.onclick = () => {
-    if (forgot.stage === 'newpass') return;
-    forgot.mode = b.dataset.m; forgot.stage = 'start';
-    $('forgot-mode').querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
-    $('forgot-email-step').classList.toggle('hidden', forgot.mode !== 'email');
-    $('forgot-key-step').classList.toggle('hidden', forgot.mode !== 'key');
-    $('forgot-error').textContent = '';
-  };
-});
+$('forgot-use-email').onclick = (e) => { e.preventDefault(); if (forgot.stage === 'newpass') return; setForgotMode(forgot.mode === 'key' ? 'email' : 'key'); };
 $('forgot-send').onclick = async () => {
   const u = $('forgot-user').value, email = $('forgot-email').value.trim(); const err = $('forgot-error'); err.textContent = '';
   if (normalizeUsername(u).length < 3) { err.textContent = 'Enter your username.'; return; }
@@ -338,7 +361,10 @@ $('forgot-form').onsubmit = async (e) => {
       return;
     }
     if (forgot.mode === 'key') {
-      forgot.sk = decodeRecoveryKey($('forgot-key').value);
+      const { key, u: lu } = parseRecoveryInput($('forgot-key').value);
+      if (!key) { err.textContent = 'Paste your recovery link or key.'; return; }
+      if (lu && !u) { $('forgot-user').value = lu; }
+      forgot.sk = decodeRecoveryKey(key);
     } else {
       if (forgot.stage !== 'code') { $('forgot-send').click(); return; }
       const code = $('forgot-code').value.trim(); if (code.length !== 6) { err.textContent = 'Enter the 6-digit code from the email.'; return; }
@@ -346,7 +372,8 @@ $('forgot-form').onsubmit = async (e) => {
       forgot.sk = await rc.recoverFinish(u, $('forgot-email').value.trim(), code);
     }
     forgot.stage = 'newpass';
-    $('forgot-email-step').classList.add('hidden'); $('forgot-key-step').classList.add('hidden'); $('forgot-mode').classList.add('hidden');
+    $('forgot-email-step').classList.add('hidden'); $('forgot-key-step').classList.add('hidden'); $('forgot-use-email').classList.add('hidden');
+    $('forgot-hint').textContent = 'Recovery accepted — choose a new password.';
     $('forgot-new').classList.remove('hidden'); $('forgot-pass').focus();
     btn.textContent = 'Set new password';
   } catch (ex) { err.textContent = ex.message; if (forgot.stage !== 'newpass') btn.textContent = 'Continue'; }
@@ -376,12 +403,13 @@ async function startApp(sk, newName, username) {
   calls = new CallManager(app);
   games = new GameManager(app);
   watch = new WatchManager(app);
-  wireApp(); wireCalls(); wireGames(); wireWatch();
+  share = new ShareManager(app);
+  wireApp(); wireCalls(); wireGames(); wireWatch(); wireShare();
   $('auth').classList.add('hidden'); $('main').classList.remove('hidden');
   $('login-form').reset(); $('signup-form').reset();
   renderAll();
   app.start().then(() => {
-    if (newName) app.syncToSelf({ t: 'profile', name: newName, u: store.state.profile.username });
+    if (newName) { app.syncToSelf({ t: 'profile', name: newName, u: store.state.profile.username }); setTimeout(() => { if (app && $('modal').classList.contains('hidden')) openRecoveryKey(true); }, 1800); }
     app.discoverable = !!settings.get().discoverable;
     if (store.state.profile.username) { app.publishDirectory(app.discoverable); republishKeystore(transport, store.state.profile.username); }
     checkRecoveryEmail();
@@ -446,10 +474,64 @@ function wireApp() {
     if (on) typingTimers[chatId] = setTimeout(() => { typingState[chatId] = null; updateTyping(); scheduleRender(); }, 6000);
     updateTyping(); renderChatList();
   });
+  // Background → foreground: relays are usually dead after a while in the background (iOS freezes the page).
+  // Reopen them and resync; after a long time away reload the whole app so nothing stays stale.
+  let hiddenAt = 0;
+  const wake = (why) => {
+    if (!app) return;
+    const away = hiddenAt ? Date.now() - hiddenAt : 0; hiddenAt = 0;
+    const busy = (calls && calls.state !== 'idle') || (share && share.state !== 'idle') || openGameId;
+    if (away > 30 * 60 * 1000 && !busy) { try { store.flush(); } catch {} location.reload(); return; }
+    if (away > 8000 || why !== 'visible') app.resume(why !== 'visible');
+  };
   document.addEventListener('visibilitychange', () => {
     app.setVisible(!document.hidden);
-    if (!document.hidden && app.openChat) app.markRead(app.openChat);
+    if (document.hidden) { hiddenAt = Date.now(); return; }
+    if (app.openChat) app.markRead(app.openChat);
+    wake('visible');
   });
+  window.addEventListener('pageshow', (e) => { if (e.persisted) wake('pageshow'); });
+  window.addEventListener('online', () => wake('online'));
+  window.addEventListener('focus', () => { if (!document.hidden && hiddenAt) wake('visible'); });
+  app.addEventListener('resuming', () => showSync(true));
+  app.addEventListener('resumed', () => showSync(false));
+  app.addEventListener('reaction', (e) => onReaction(e.detail));
+}
+let syncEl = null, syncTimer = null;
+function showSync(on) {
+  clearTimeout(syncTimer);
+  if (on) {
+    if (!syncEl) { syncEl = document.createElement('div'); syncEl.className = 'sync-bar'; syncEl.innerHTML = '<span class="spin"></span>Reconnecting…'; document.body.appendChild(syncEl); }
+    syncTimer = setTimeout(() => showSync(false), 12000);
+  } else if (syncEl) { syncEl.remove(); syncEl = null; }
+}
+/* tiny UI sounds (dice, hops, reactions) */
+let fxCtx = null;
+function fx(freq = 800, dur = 0.05, at = 0, gain = 0.07, type = 'triangle') {
+  if (!settings.get().sounds) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext; fxCtx = fxCtx || new AC();
+    if (fxCtx.state === 'suspended') fxCtx.resume().catch(() => {});
+    const t = fxCtx.currentTime + at; const o = fxCtx.createOscillator(), g = fxCtx.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t); g.gain.setValueAtTime(gain, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g).connect(fxCtx.destination); o.start(t); o.stop(t + dur + 0.02);
+  } catch {}
+}
+/* reactions */
+const QUICK_RX = ['❤️', '😂', '😮', '😢', '😡', '👍'];
+function rxHtml(m) {
+  if (!m.rx) return '';
+  const by = {}; for (const [pk, r] of Object.entries(m.rx)) (by[r.e] = by[r.e] || []).push(pk);
+  return `<div class="rx">${Object.entries(by).sort((a, b) => b[1].length - a[1].length).map(([e, pks]) => `<button class="chip ${pks.includes(app.pk) ? 'mine' : ''}" data-rx-toggle="${esc(e)}" title="${esc(pks.map((p) => (p === app.pk ? 'You' : app.nameOf(p))).join(', '))}">${esc(e)}${pks.length > 1 ? `<b>${pks.length}</b>` : ''}</button>`).join('')}</div>`;
+}
+function onReaction({ chatId, mid, e, fresh }) {
+  if (chatId !== app.openChat) return;
+  renderedFor = null; renderChat();
+  if (fresh && e) {
+    const el = document.querySelector(`.msg[data-id="${mid}"]`);
+    if (el) { const b = document.createElement('span'); b.className = 'rx-burst'; b.textContent = e; el.appendChild(b); setTimeout(() => b.remove(), 1200); }
+    haptic(10); fx(1200, 0.08, 0, 0.04, 'sine');
+  }
 }
 
 /* ---------------- rendering ---------------- */
@@ -623,7 +705,7 @@ function renderSettings() {
     <div class="card">
       <div class="srow clickable" id="s-email"><div><div>Recovery email</div><div class="tiny muted">${p.recoveryEmail ? esc(p.recoveryEmail) + ' · verified' : rc.enabled ? 'Not set — add one so you can reset a forgotten password' : 'Needs a recovery server (Network ↓)'}</div></div><span class="muted">${p.recoveryEmail ? '✓' : '›'}</span></div>
       <div class="srow clickable" id="s-pass"><div><div>Change password</div><div class="tiny muted">Friends, history and username stay the same.</div></div><span class="muted">›</span></div>
-      <div class="srow clickable" id="s-rkey"><div><div>Recovery key</div><div class="tiny muted">Resets your password without email. Save it somewhere safe.</div></div><span class="muted">›</span></div>
+      <div class="srow clickable" id="s-rkey"><div><div>Recovery link</div><div class="tiny muted">The one way back in if you forget your password. Save it somewhere safe.</div></div><span class="muted">›</span></div>
     </div>
     <h4>Appearance</h4>
     <div class="card">
@@ -648,7 +730,7 @@ function renderSettings() {
       <div class="srow clickable" id="s-logout"><span>Log out</span><span class="muted">Keeps encrypted history</span></div>
       <div class="srow clickable" id="s-wipe"><span class="danger">Delete all data on this device</span></div>
     </div>
-    <p class="tiny muted" style="margin-top:16px">Chatly v5 · Your password unlocks your encryption key. Reset it with your recovery email or recovery key.</p>`;
+    <p class="tiny muted" style="margin-top:16px">Chatly v6 · Your password unlocks your encryption key. Forgot it? Use your recovery link.</p>`;
   el.querySelector('.profile .avatar').onclick = () => openAvatarPicker();
   $('s-photo').onclick = () => openAvatarPicker();
   $('s-avatar').onclick = () => openAvatarPicker(true);
@@ -724,13 +806,18 @@ async function openChangePassword() {
   $('pw-form').onsubmit = (e) => { e.preventDefault(); attempt(...fields.map((f) => $(f.id).value)); };
   await attempt(...vals);
 }
-function openRecoveryKey() {
+function openRecoveryKey(firstRun = false) {
   const key = encodeRecoveryKey(accountSk);
-  showModal(`<h3>Recovery key</h3><p class="muted tiny" style="margin:0 0 10px">Anyone with this key can log in to your account. Store it in a password manager or on paper — never send it in a chat.</p>
-    <div class="rkey" id="rkey-text">${key}</div>
-    <div class="row" style="justify-content:flex-end"><button class="btn ghost" id="rk-close">Close</button><button class="btn primary" id="rk-copy">Copy</button></div>`);
+  const link = recoveryLink(key, app.state.profile.username);
+  showModal(`<h3>${firstRun ? 'Save your recovery link' : 'Recovery link'}</h3>
+    <p class="muted tiny" style="margin:0 0 10px">${firstRun ? 'Forgot your password one day? Open this link and set a new one. There is no other way back in, so keep it somewhere safe (notes app, password manager).' : 'Open this link to reset your password without email. Anyone with it can log in as you — keep it private.'}</p>
+    <div class="rk-box" id="rkey-text">${esc(link)}</div>
+    <div class="rk-actions"><button class="btn primary" id="rk-copy">Copy link</button>${navigator.share ? '<button class="btn ghost" id="rk-share">Save / share…</button>' : ''}</div>
+    <details class="tiny muted" style="margin-top:10px"><summary>Show the key only</summary><div class="rk-box" style="margin-top:6px">${key}</div></details>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn ghost" id="rk-close">${firstRun ? 'Later' : 'Close'}</button></div>`);
   $('rk-close').onclick = hideModal;
-  $('rk-copy').onclick = async () => { try { await navigator.clipboard.writeText(key); toast('Recovery key copied'); } catch { toast('Select the key and copy it manually'); } };
+  $('rk-copy').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Recovery link copied'); } catch { toast('Select the link and copy it manually'); } };
+  const sh = $('rk-share'); if (sh) sh.onclick = () => navigator.share({ title: 'Chatly recovery link', text: 'My Chatly password recovery link — keep private', url: link }).catch(() => {});
 }
 async function openRecoveryEmail() {
   const p = app.state.profile; const u = p.username;
@@ -1037,13 +1124,13 @@ function renderChat(scrollToEnd = false) {
   $('left-note').classList.toggle('hidden', !(group && !g));
   $('audio-call-btn').classList.toggle('hidden', group || !can || pending);
   $('video-call-btn').classList.toggle('hidden', group || !can || pending);
-  $('together-btn').classList.toggle('hidden', !can || pending);
+  $('plus-btn').classList.toggle('hidden', !can || pending);
   updateTyping();
 
   const box = $('messages');
   const chat = app.store.chat(id);
   const wasAtBottom = atBottom();
-  const key = id + ':' + chat.messages.length + ':' + chat.messages.map((m) => m.id.slice(0, 8) + (m.status || '') + (m.video ? (m.video.ready ? 'R' : m.video.got || 0) + ':' + (app.sending[m.id] ?? '') : '')).join('') + ':' + (group && g ? g.members.length : '') + ':' + [...playing].join('');
+  const key = id + ':' + chat.messages.length + ':' + chat.messages.map((m) => m.id.slice(0, 8) + (m.status || '') + (m.rx ? Object.values(m.rx).map((r) => r.e).join('') : '') + (m.video ? (m.video.ready ? 'R' : m.video.got || 0) + ':' + (app.sending[m.id] ?? '') : '')).join('') + ':' + (group && g ? g.members.length : '') + ':' + [...playing].join('');
   if (renderedFor !== key) {
     renderedFor = key;
     if (renderedChat !== id) { renderedIds = new Set(chat.messages.map((m) => m.id)); renderedChat = id; }
@@ -1088,7 +1175,7 @@ function renderChat(scrollToEnd = false) {
         else tick = `<span class="tick ${m.status === 'read' ? 'read' : ''}">${m.status === 'sent' || group ? '✓' : '✓✓'}</span>`;
       }
       const sender = group && !out && !cont ? `<div class="sender" style="color:${colorOf(m.from)}">${esc(app.nameOf(m.from))}</div>` : '';
-      html += `<div class="msg ${out ? 'out' : 'in'} ${emojiOnly ? 'emoji-only' : ''} ${m.kind === 'sticker' ? (animOf(m.sticker) ? 'aemoji-msg' : 'sticker-msg') : m.kind === 'video' ? 'video-msg' : ''} ${cont ? 'cont' : ''} ${isNew(m) ? 'anim' : ''}" data-id="${m.id}">${sender}<div class="bubble">${quote}${body}</div><div class="meta">${fmtTime(m.ts)} ${tick}</div><button class="act" data-reply="${m.id}" title="Reply">${REPLY_SVG}</button></div>`;
+      html += `<div class="msg ${out ? 'out' : 'in'} ${emojiOnly ? 'emoji-only' : ''} ${m.kind === 'sticker' ? (animOf(m.sticker) ? 'aemoji-msg' : 'sticker-msg') : m.kind === 'video' ? 'video-msg' : ''} ${cont ? 'cont' : ''} ${isNew(m) ? 'anim' : ''} ${m.rx ? 'has-rx' : ''}" data-id="${m.id}">${sender}<div class="bubble">${quote}${body}</div><div class="meta">${fmtTime(m.ts)} ${tick}</div><button class="act" data-reply="${m.id}" title="Reply">${REPLY_SVG}</button>${rxHtml(m)}</div>`;
       prev = m;
     }
     box.innerHTML = html;
@@ -1098,6 +1185,7 @@ function renderChat(scrollToEnd = false) {
     box.querySelectorAll('[data-play]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); playVideo(el.dataset.play); }; });
     box.querySelectorAll('.vid video').forEach((el) => { el.onclick = (e) => e.stopPropagation(); });
     box.querySelectorAll('[data-reply]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); setReply(el.dataset.reply); }; });
+    box.querySelectorAll('[data-rx-toggle]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); const mid = el.closest('.msg').dataset.id; haptic(); app.react(id, mid, el.dataset.rxToggle); }; });
     box.querySelectorAll('[data-jump]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); jumpTo(el.dataset.jump); }; });
     box.querySelectorAll('[data-watch]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); startWatch(id, el.dataset.watch); }; });
     box.querySelectorAll('[data-callback]').forEach((el) => { el.onclick = () => startCall(id, el.dataset.callback === 'v'); });
@@ -1221,7 +1309,8 @@ async function messageMenu(mid) {
   if (m.kind === 'image') items.push({ id: 'view', label: 'View photo' });
   if (m.kind === 'video' && m.video && m.video.ready) items.push({ id: 'save', label: 'Save video' });
   items.push({ id: 'delete', label: 'Delete for me', danger: true });
-  const act = await menuSheet(items);
+  const mine = m.rx && m.rx[app.pk] ? m.rx[app.pk].e : '';
+  const act = await reactionMenu(items, mine, (e) => { app.react(id, mid, e); fx(1000, 0.08, 0, 0.04, 'sine'); });
   if (act === 'reply') setReply(mid);
   else if (act === 'copy') { try { await navigator.clipboard.writeText(m.text); toast('Copied'); } catch { toast('Could not copy'); } }
   else if (act === 'watch') startWatch(id, m.text.match(MEDIA_RE)[0]);
@@ -1254,7 +1343,7 @@ async function sendSticker(sid) {
   const m = await app.sendMessage(id, { sticker: sid, replyTo: re });
   if (m.status === 'failed') toast('Could not send sticker', 'error');
 }
-$('attach-btn').onclick = () => $('file-input').click();
+const attachBtn = $('attach-btn'); if (attachBtn) attachBtn.onclick = () => $('file-input').click();
 $('file-input').onchange = async () => {
   const file = $('file-input').files[0]; $('file-input').value = '';
   if (!file || !app.openChat) return;
@@ -1357,7 +1446,7 @@ async function compressImage(file) {
 const EMOJIS = '😀 😂 🤣 😊 😍 🥰 😘 😎 🤩 🥳 😅 😉 🙃 😇 🤔 🤨 😏 😴 🤤 😭 😤 😡 🤯 🥺 😬 🙄 😳 🤗 🤭 🤫 👍 👎 👌 ✌️ 🤞 🤙 👏 🙌 🙏 💪 ❤️ 🧡 💛 💚 💙 💜 🖤 💔 💯 🔥 ✨ 🎉 🎂 🍕 ☕ 🍻 ⚽ 🎮 🎵 🚀 🌙 ☀️ 🌈 🐶 🐱 🦄 👀 💀 🫶 🤝 👋'.split(' ');
 let pickerTab = 'emoji';
 function renderPicker() {
-  const tabs = [{ id: 'emoji', name: 'Emoji' }, { id: 'anim', name: 'Animated' }, ...PACKS.map((p) => ({ id: p.id, name: p.name }))];
+  const tabs = [{ id: 'emoji', name: 'Emoji' }, { id: 'live', name: 'Live' }, { id: 'anim', name: 'Animated' }, ...PACKS.filter((p) => p.id !== 'live').map((p) => ({ id: p.id, name: p.name }))];
   $('picker-tabs').innerHTML = tabs.map((t) => `<button class="${pickerTab === t.id ? 'active' : ''}" data-p="${t.id}">${esc(t.name)}</button>`).join('');
   $('picker-tabs').querySelectorAll('button').forEach((b) => { b.onclick = () => { pickerTab = b.dataset.p; renderPicker(); }; });
   const body = $('picker-body');
@@ -1410,19 +1499,49 @@ $('chat-menu-btn').onclick = async () => {
 };
 
 /* together menu */
-$('together-btn').onclick = () => openTogether(app.openChat);
-async function openTogether(id, gamesOnly = false) {
+$('plus-btn').onclick = () => openPlus(app.openChat);
+async function openPlus(id) {
+  if (!id) return;
+  const group = isGroupId(id);
+  const active = games.forChat(id).length;
+  const live = share && share.state !== 'idle';
+  showModal(`<div class="plus-grid">
+    <button data-p="media"><span class="ic media"><svg viewBox="0 0 24 24"><path d="M4 5h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm1 12h14l-4.5-6-3.5 4.5L8.5 13Zm3-8a1.8 1.8 0 1 0 0 3.6A1.8 1.8 0 0 0 8 9Z"/></svg></span>Photo / video</button>
+    <button data-p="sticker"><span class="ic sticker"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM7.2 14h9.6c-.7 2.4-2.6 4-4.8 4s-4.1-1.6-4.8-4Z"/></svg></span>Stickers</button>
+    <button data-p="games"><span class="ic games"><svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3 3.5A1.5 1.5 0 1 0 8 9.5a1.5 1.5 0 0 0 0-3Zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm-4 4A1.5 1.5 0 1 0 12 13.5a1.5 1.5 0 0 0 0-3Zm-4 4A1.5 1.5 0 1 0 8 17.5a1.5 1.5 0 0 0 0-3Zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg></span>Games${active ? ` · ${active}` : ''}</button>
+    <button data-p="watch"><span class="ic watch"><svg viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm6 4.5v7l6-3.5-6-3.5Z"/></svg></span>Watch reel</button>
+    <button data-p="music" ${group ? 'disabled' : ''} title="${group ? 'One-to-one chats only' : ''}"><span class="ic music">${live ? '<svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3Z"/></svg>'}</span>${live ? 'Stop sharing' : 'Listen together'}</button>
+  </div>`);
+  $('plus-btn').classList.add('open');
+  const un = () => $('plus-btn').classList.remove('open');
+  const ob = new MutationObserver(() => { if ($('modal').classList.contains('hidden')) { un(); ob.disconnect(); } });
+  ob.observe($('modal'), { attributes: true, attributeFilter: ['class'] });
+  $('modal-body').querySelectorAll('[data-p]').forEach((b) => {
+    b.onclick = () => {
+      hideModal(); un(); haptic();
+      const p = b.dataset.p;
+      if (p === 'media') $('file-input').click();
+      else if (p === 'sticker') $('emoji-btn').click();
+      else if (p === 'games') openGames(id);
+      else if (p === 'watch') openWatch(id);
+      else if (p === 'music') { if (live) share.stop(); else startShare(id); }
+    };
+  });
+}
+async function openWatch(id) {
+  if (!id) return;
+const url = await promptSheet('Watch together', '', 'Paste an Instagram reel / YouTube / TikTok link', 'Everyone in this chat gets the same clip at the same time. Both of you need internet; the clip plays in the platform’s own player.'); if (url) startWatch(id, url);
+}
+async function openGames(id) {
   if (!id) return;
   const active = games.forChat(id);
   const items = [
-    ...(gamesOnly ? [] : [{ id: 'watch', label: '📺 Watch a reel together' }]),
     ...active.map((s) => ({ id: 'g:' + s.id, label: `${GAMES[s.type].icon} ${s.status === 'lobby' ? 'Join' : 'Open'} ${GAMES[s.type].name} (${s.players.length} player${s.players.length === 1 ? '' : 's'})` })),
     { id: 'ttt', label: '⭕ New Tic-Tac-Toe' }, { id: 'ludo', label: '🎲 New Ludo' },
   ];
   const act = await menuSheet(items);
   if (!act) return;
-  if (act === 'watch') { const url = await promptSheet('Watch together', '', 'Paste an Instagram reel / YouTube / TikTok link', 'Everyone in this chat gets the same clip at the same time. Both of you need internet; the clip plays in the platform’s own player.'); if (url) startWatch(id, url); }
-  else if (act.startsWith('g:')) openGame(act.slice(2));
+  if (act.startsWith('g:')) openGame(act.slice(2));
   else { try { const s = games.invite(id, act); openGame(s.id); } catch (e) { toast(e.message, 'error'); } }
 }
 
@@ -1610,7 +1729,7 @@ async function leaveGame() {
 }
 $('game-quit').onclick = leaveGame;
 $('game-mini-leave').onclick = (e) => { e.stopPropagation(); leaveGame(); };
-let autoMoveTimer = null;
+let autoMoveTimer = null, lastDone = null;
 function renderGame() {
   const s = games.get(openGameId); if (!s) { closeGamePanel(); return; }
   const G = GAMES[s.type];
@@ -1642,19 +1761,154 @@ function renderGame() {
     body.innerHTML = `<div class="game-panel-done">${s.quitBy ? `${esc(s.quitBy === app.pk ? 'You' : app.nameOf(s.quitBy))} left the game` : w !== null && w !== undefined ? `🏆 ${esc(w === my ? 'You won!' : app.nameOf(s.players[w]) + ' won')}` : 'Game over'}</div>
       <button class="btn primary" id="game-again">Play again</button>`;
     $('game-again').onclick = () => { try { const n = games.invite(s.chatId, s.type); openGame(n.id); } catch (e) { toast(e.message, 'error'); } };
+    if (w !== null && w !== undefined && w === my && !s.quitBy && lastDone !== s.id) { lastDone = s.id; confetti(body, 48); fx(900, 0.2, 0, 0.06, 'sine'); fx(1200, 0.2, 0.15, 0.06, 'sine'); fx(1600, 0.35, 0.3, 0.06, 'sine'); }
     return;
   }
   const nameOf = (p) => (p === app.pk ? 'You' : app.nameOf(p));
   body.innerHTML = s.type === 'ttt' ? renderTTT(s, my, nameOf) : renderLudo(s, my, nameOf);
+  if (s.type === 'ludo') animateLudo(s, body);
   body.querySelectorAll('.ttt-cell.can').forEach((b) => { b.onclick = () => { haptic(); games.move(s.id, { i: Number(b.dataset.i) }); }; });
   body.querySelectorAll('[data-game-act=again]').forEach((b) => { b.onclick = () => games.move(s.id, { a: 'again' }); });
-  body.querySelectorAll('[data-game-act=roll]').forEach((b) => { b.onclick = () => { haptic(15); games.move(s.id, { a: 'roll', d: 1 + Math.floor(Math.random() * 6) }); }; });
+  body.querySelectorAll('[data-game-act=roll]').forEach((b) => { b.onclick = () => { haptic(15); b.disabled = true; games.move(s.id, { a: 'roll', d: 1 + Math.floor(Math.random() * 6) }); }; });
   body.querySelectorAll('.tok.can').forEach((t) => { t.onclick = () => { haptic(); games.move(s.id, { a: 'move', i: Number(t.dataset.tok) }); }; });
   clearTimeout(autoMoveTimer);
   if (s.type === 'ludo' && my >= 0) {
     const legal = games.legal(s.id);
-    if (legal.length === 1 && s.state.phase === 'move' && s.state.turn === my) autoMoveTimer = setTimeout(() => games.move(s.id, { a: 'move', i: legal[0] }), 650);
+    if (legal.length === 1 && s.state.phase === 'move' && s.state.turn === my) autoMoveTimer = setTimeout(() => games.move(s.id, { a: 'move', i: legal[0] }), 1150);
   }
+}
+const ludoSeen = {};
+function animateLudo(s, body) {
+  const st = s.state, last = st.last, seq = st.seq || 0;
+  const prev = ludoSeen[s.id]; ludoSeen[s.id] = seq;
+  const svg = body.querySelector('.ludo'); if (!svg) return;
+  const myTurn = s.players[st.turn] === app.pk;
+  if (myTurn && st.phase === 'move' && prev !== undefined && seq !== prev) svg.classList.add('waiting');
+  if (prev === undefined || seq === prev || !last || reducedMotion()) { svg.classList.remove('waiting'); return; }
+  if (last.a === 'roll') {
+    const dice = body.querySelector('.dice'); if (!dice) return;
+    svg.classList.add('waiting'); dice.classList.add('rolling');
+    for (let k = 0; k < 6; k++) fx(500 + Math.random() * 500, 0.04, k * 0.11, 0.05, 'square');
+    setTimeout(() => { dice.classList.remove('rolling'); dice.dataset.d = last.d; svg.classList.remove('waiting'); haptic(10); fx(last.d === 6 ? 1400 : 900, 0.12, 0, 0.06, 'sine'); }, 760);
+    return;
+  }
+  if (last.a !== 'move') return;
+  const tok = svg.querySelector(`[data-key="${last.pi}-${last.i}"]`);
+  let dur = 0;
+  if (tok) {
+    const pts = [];
+    if (last.from === -1) pts.push(ludoXY(st, last.pi, last.i, -1), ludoXY(st, last.pi, last.i, 0));
+    else for (let p = last.from; p <= last.to; p++) pts.push(ludoXY(st, last.pi, last.i, p));
+    pts[pts.length - 1] = [parseFloat(tok.style.getPropertyValue('--tx')), parseFloat(tok.style.getPropertyValue('--ty'))];
+    const n = pts.length - 1; if (n < 1) return;
+    const frames = [];
+    pts.forEach(([x, y], k) => {
+      frames.push({ transform: `translate(${x}px,${y}px) scale(1)`, offset: k / n });
+      if (k < n) { const [nx, ny] = pts[k + 1]; frames.push({ transform: `translate(${(x + nx) / 2}px,${(y + ny) / 2 - 6}px) scale(1.35)`, offset: (k + 0.5) / n }); }
+    });
+    dur = Math.max(480, Math.min(1500, 170 * n + 150));
+    svg.classList.add('waiting'); tok.classList.add('moving'); tok.parentNode.appendChild(tok);
+    const a = tok.animate(frames, { duration: dur, easing: 'linear', fill: 'both' });
+    for (let k = 1; k <= n; k++) fx(700 + k * 40, 0.03, (dur / n) * k / 1000, 0.04);
+    a.onfinish = () => { a.cancel(); tok.classList.remove('moving'); svg.classList.remove('waiting'); haptic(8); if (last.finished) { fx(1000, 0.15, 0, 0.06, 'sine'); fx(1500, 0.25, 0.12, 0.06, 'sine'); confetti(body, 24); } };
+  }
+  for (const c of last.caps || []) {
+    const ct = svg.querySelector(`[data-key="${c.pi}-${c.i}"]`); if (!ct) continue;
+    const [sx, sy] = ludoXY(st, c.pi, c.i, c.from); const fxp = parseFloat(ct.style.getPropertyValue('--tx')), fyp = parseFloat(ct.style.getPropertyValue('--ty'));
+    ct.parentNode.appendChild(ct);
+    const a = ct.animate([
+      { transform: `translate(${sx}px,${sy}px) scale(1)` }, { transform: `translate(${sx}px,${sy}px) scale(1.5) rotate(20deg)`, offset: 0.3 },
+      { transform: `translate(${fxp}px,${fyp}px) scale(0.5)`, offset: 0.85 }, { transform: `translate(${fxp}px,${fyp}px) scale(1)` },
+    ], { duration: 900, delay: Math.max(0, dur - 120), easing: 'cubic-bezier(.32,.72,0,1)', fill: 'both' });
+    a.onfinish = () => a.cancel();
+    setTimeout(() => { body.classList.remove('game-flash'); void body.offsetWidth; body.classList.add('game-flash'); haptic(30); fx(300, 0.25, 0, 0.08, 'sawtooth'); if (c.pi === games.myIndex(s)) toast('Your token was captured!'); else if (last.pi === games.myIndex(s)) toast('Captured! 🎯'); }, Math.max(0, dur - 120));
+  }
+}
+function confetti(host, count = 36) {
+  if (reducedMotion()) return;
+  const colors = ['#f1c40f', '#2ecc71', '#2d8cff', '#ec4899', '#f97316', '#8b5cf6'];
+  const w = host.clientWidth || 300;
+  for (let k = 0; k < count; k++) {
+    const el = document.createElement('i'); el.className = 'confetti-piece';
+    el.style.left = Math.random() * w + 'px'; el.style.background = colors[k % colors.length];
+    host.appendChild(el);
+    const drift = (Math.random() - 0.5) * 160;
+    const a = el.animate([{ transform: 'translate(0,0) rotate(0)', opacity: 1 }, { transform: `translate(${drift}px, ${(host.clientHeight || 400) + 30}px) rotate(${540 + Math.random() * 360}deg)`, opacity: 0.9 }], { duration: 1600 + Math.random() * 1200, delay: Math.random() * 400, easing: 'cubic-bezier(.2,.6,.4,1)', fill: 'forwards' });
+    a.onfinish = () => el.remove();
+  }
+}
+
+/* ---------------- listen / watch together from this device ---------------- */
+let shareMini = false, shareWired = false, lastShareSync = 0;
+function startShare(peer) {
+  if (!peer || isGroupId(peer)) { toast('Listen together works in one-to-one chats'); return; }
+  if (share.state !== 'idle') { openShare(false); return; }
+  if (!(window.AudioContext || window.webkitAudioContext)) { toast('Not supported in this browser'); return; }
+  const inp = $('share-input'); inp.value = '';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    openShare(false);
+    try { await share.start(peer, f, $('share-local')); } catch (e) { toast(e.message || 'Could not share', 'error'); }
+  };
+  inp.click();
+}
+function openShare(mini) {
+  shareMini = mini; $('share').classList.remove('hidden');
+  if (calls && calls.state !== 'idle') { $('call').classList.add('watching'); if (!callMini) setCallMini(true); }
+  renderShare();
+}
+function closeShare() {
+  const p = $('share'); p.classList.add('hidden'); p.classList.remove('mini');
+  const lv = $('share-local'); lv.pause(); lv.removeAttribute('src'); lv.load(); lv.classList.add('hidden');
+  const rv = $('share-remote'); rv.srcObject = null; rv.classList.add('hidden');
+  $('share-art').classList.remove('playing'); $('share-prog').style.width = '0';
+  if ($('watch').classList.contains('hidden')) $('call').classList.remove('watching');
+}
+const fmtPos = (t) => { t = Math.max(0, Math.round(t || 0)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
+function updateShareProg(playing, pos, dur) {
+  $('share-art').classList.toggle('playing', !!playing);
+  $('share-prog').style.width = dur ? `${Math.min(100, (pos / dur) * 100)}%` : '0';
+  if (share.state === 'active') $('share-sub').innerHTML = `${playing ? '<span class="eq"><i></i><i></i><i></i></span>' : '⏸ '}${fmtPos(pos)}${dur ? ' / ' + fmtPos(dur) : ''} · ${esc(app.nameOf(share.peer))}`;
+}
+function renderShare() {
+  const i = share.info(); const panel = $('share');
+  if (i.state === 'idle') { closeShare(); return; }
+  panel.classList.remove('hidden'); panel.classList.toggle('mini', shareMini);
+  const host = i.role === 'host'; const peerName = app.nameOf(i.peer);
+  $('share-title').textContent = i.hasVideo ? 'Watching together' : 'Listening together';
+  $('share-name').textContent = i.title || 'Shared media';
+  $('share-sub').textContent = i.state === 'offering' ? `Waiting for ${peerName} to join…` : i.state === 'connecting' ? 'Connecting…' : i.state === 'incoming' ? `${peerName} wants to share` : host ? `Playing for ${peerName}` : `From ${peerName}`;
+  const lv = $('share-local'), rv = $('share-remote');
+  lv.classList.toggle('hidden', !host); lv.classList.toggle('audio', !i.hasVideo);
+  rv.classList.toggle('hidden', host || !i.hasVideo);
+  $('share-art').classList.toggle('hidden', i.hasVideo && (host || i.state === 'active'));
+  if (!host && i.remote && rv.srcObject !== i.remote) { rv.srcObject = i.remote; rv.muted = false; rv.play().catch(() => {}); }
+  $('share-ctl').innerHTML = !host && i.state === 'active' ? '<button class="btn ghost small" id="share-unmute">Tap if you hear nothing</button>' : '';
+  const um = $('share-unmute'); if (um) um.onclick = () => { rv.muted = false; rv.play().catch(() => {}); };
+}
+const SHARE_END = { ended: 'Sharing ended', declined: 'They declined', busy: 'They are busy right now', 'no-answer': 'No answer', failed: 'Could not connect', error: 'Sharing failed' };
+function wireShare() {
+  share.addEventListener('state', renderShare);
+  share.addEventListener('remote', renderShare);
+  share.addEventListener('sync', (e) => { const m = e.detail; updateShareProg(!!m.p, m.pos, m.dur); });
+  share.addEventListener('error', (e) => toast(e.detail || 'Sharing failed', 'error'));
+  share.addEventListener('ended', (e) => { closeShare(); toast(SHARE_END[e.detail] || 'Sharing ended'); });
+  share.addEventListener('invite', async (e) => {
+    const d = e.detail; const name = app.nameOf(d.from);
+    if (settings.get().sounds) tones.notify(); haptic(30);
+    const ok = await confirmSheet(`${name} wants to ${d.video ? 'watch' : 'listen to'} “${d.title || 'something'}” with you`, 'It plays from their device over an encrypted direct connection — nothing is uploaded anywhere.', d.video ? 'Watch together' : 'Listen together', false);
+    if (share.state !== 'incoming') return;
+    if (ok) { openShare(false); try { await share.accept(); } catch (ex) { toast(ex.message || 'Could not join', 'error'); } } else share.decline();
+  });
+  if (shareWired) return; shareWired = true;
+  const lv = $('share-local');
+  const push = () => { if (share.role !== 'host') return; share.sync(!lv.paused, lv.currentTime, lv.duration); updateShareProg(!lv.paused, lv.currentTime, lv.duration); lastShareSync = Date.now(); };
+  ['play', 'pause', 'seeked', 'ended'].forEach((ev) => lv.addEventListener(ev, push));
+  lv.addEventListener('timeupdate', () => { if (share.role !== 'host') return; updateShareProg(!lv.paused, lv.currentTime, lv.duration); if (Date.now() - lastShareSync > 4000) push(); });
+  $('share-stop').onclick = () => share.stop();
+  $('share-min').onclick = (e) => { e.stopPropagation(); shareMini = !shareMini; renderShare(); haptic(); };
+  $('share').querySelector('header').onclick = (e) => { if (shareMini && !e.target.closest('button')) { shareMini = false; renderShare(); } };
+  $('call-share-btn').onclick = (e) => { e.stopPropagation(); const peer = calls.peer; if (!peer) return; if (share.state !== 'idle') { openShare(false); return; } startShare(peer); };
 }
 
 /* ---------------- calls ---------------- */
@@ -1687,7 +1941,7 @@ $('mute-btn').onclick = () => calls.toggleMute();
 $('cam-btn').onclick = () => calls.toggleCamera();
 $('flip-btn').onclick = () => calls.switchCamera();
 $('share-btn').onclick = () => calls.shareScreen();
-$('call-game-btn').onclick = (e) => { e.stopPropagation(); const peer = calls.peer; if (!peer) return; setCallMini(true); openTogether(peer, true); };
+$('call-game-btn').onclick = (e) => { e.stopPropagation(); const peer = calls.peer; if (!peer) return; setCallMini(true); openGames(peer); };
 let speakerOn = false;
 function setSpeaker(on) {
   speakerOn = on;
@@ -1792,7 +2046,21 @@ function renderCall(info) {
 
 /* ---------------- boot ---------------- */
 applyTheme();
+let pendingRecover = null;
+function applyPendingRecover() {
+  if (!pendingRecover || $('auth').classList.contains('hidden')) return;
+  const { key, u } = pendingRecover; pendingRecover = null;
+  resetForgot(); showAuthForm('forgot-form');
+  $('forgot-user').value = u; $('forgot-key').value = key;
+  if (u) $('forgot-form').requestSubmit(); else $('forgot-user').focus();
+}
 function parseHash() {
+  if (/#recover=/.test(location.hash)) {
+    const r = parseRecoveryInput(location.hash);
+    history.replaceState(null, '', location.pathname + location.search);
+    if (app) { toast('Log out first to use a recovery link'); return; }
+    pendingRecover = r; applyPendingRecover(); return;
+  }
   const m = location.hash.match(/#add=([^&]+)(?:&n=([^&]+))?/);
   if (!m) return;
   const pk = parseFriendCode(m[1]);
@@ -1811,4 +2079,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.se
     try { await startApp(hexToBytes(saved), null); return; } catch (e) { console.error(e); session.clear(); }
   }
   $('auth').classList.remove('hidden');
+  applyPendingRecover();
 })();

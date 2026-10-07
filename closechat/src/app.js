@@ -35,6 +35,8 @@ export class App extends EventTarget {
     this.callHandler = null;
     this.gameHandler = null;
     this.watchHandler = null;
+    this.shareHandler = null;
+    this.lastResume = 0;
     this.pendingGroup = {};   // gid -> rumors that arrived before the group sync
     this.ready = false;
     this.presence = {};       // pk -> last heartbeat ms (not persisted)
@@ -58,9 +60,24 @@ export class App extends EventTarget {
       this.startPresence();
     });
     this.store.onChange(() => this.checkBackup());
+    // Backgrounded tabs (and iOS web views) silently lose their sockets: poll and heal.
+    this.watchdog = setInterval(() => { if (this.visible && this.ready && this.transport.connected === 0) this.resume(); }, 15000);
   }
 
-  stop() { clearInterval(this.presenceTimer); clearTimeout(this.backupTimer); }
+  stop() { clearInterval(this.presenceTimer); clearTimeout(this.backupTimer); clearInterval(this.watchdog); }
+
+  // Called when the app comes back to the foreground / network returns: reopen
+  // dead relay sockets and re-subscribe so nothing sent while we were frozen is missed.
+  async resume(force = false) {
+    if (!this.ready) return;
+    if (!force && Date.now() - this.lastResume < 10000) return;
+    this.lastResume = Date.now();
+    this.emit('resuming');
+    try { await this.transport.reconnect(); } catch {}
+    const since = this.state.lastSync ? this.state.lastSync - 3 * 24 * 3600 : Math.floor(Date.now() / 1000) - 90 * 24 * 3600;
+    this.transport.listen(this.pk, since, (w) => this.handleWrap(w), () => this.emit('resumed'));
+    this.sendPresence(null, true);
+  }
 
   /* ---------- identity helpers ---------- */
   isFriend(pk) { const f = this.state.friends[pk]; return !!f && f.status === 'friend'; }
@@ -234,6 +251,9 @@ export class App extends EventTarget {
       this.handleGroupControl(this.pk, c, rumor);
     } else if (c.t === 'game') {
       if (this.gameHandler) this.gameHandler(this.chatIdFor(this.pk, c), this.pk, c, rumor);
+    } else if (c.t === 'react') {
+      const chatId = c.g ? 'g:' + c.g : to;
+      if (chatId && chatId !== this.pk) this.applyReaction(chatId, this.pk, c, rumor.created_at);
     } else if (c.t === 'calllog' && c.e && typeof c.e === 'object' && /^[0-9a-f]{64}$/.test(c.e.peer || '')) {
       const e = c.e;
       this.logCall({ id: String(e.id || rumor.id).slice(0, 64), peer: e.peer, dir: e.dir === 'out' ? 'out' : 'in', video: !!e.video, ts: Number(e.ts) || rumor.created_at * 1000, dur: Number(e.dur) || 0, missed: !!e.missed, reason: String(e.reason || '').slice(0, 20) }, true);
@@ -242,6 +262,32 @@ export class App extends EventTarget {
   }
 
   chatIdFor(from, c) { return c.g ? 'g:' + c.g : from; }
+
+  /* ---------- reactions ---------- */
+  // m.rx = { pk: { e, ts } }; an empty emoji removes, older copies never win.
+  applyReaction(chatId, from, c, ts) {
+    const mid = String(c.id || ''); if (!/^[0-9a-f]{64}$/.test(mid)) return;
+    const chat = this.state.chats[chatId]; if (!chat) return;
+    const m = chat.messages.find((x) => x.id === mid); if (!m) return;
+    const e = typeof c.e === 'string' ? c.e.slice(0, 16) : '';
+    m.rx = m.rx || {};
+    const prev = m.rx[from];
+    if (prev && prev.ts > ts) return;
+    if (e) m.rx[from] = { e, ts }; else delete m.rx[from];
+    if (!Object.keys(m.rx).length) delete m.rx;
+    this.emit('reaction', { chatId, mid, from, e, fresh: this.ready && from !== this.pk });
+  }
+  react(chatId, mid, e) {
+    const chat = this.store.chat(chatId);
+    const m = chat.messages.find((x) => x.id === mid); if (!m) return;
+    const cur = m.rx && m.rx[this.pk] ? m.rx[this.pk].e : '';
+    const next = cur === e ? '' : e;
+    const ts = Math.floor(Date.now() / 1000);
+    this.applyReaction(chatId, this.pk, { id: mid, e: next }, ts);
+    this.store.save();
+    this.sendChatControl(chatId, { t: 'react', id: mid, e: next }, false, true);
+    return next;
+  }
 
   handleControl(rumor) {
     const from = rumor.pubkey;
@@ -338,6 +384,16 @@ export class App extends EventTarget {
         if (this.gameHandler) this.gameHandler(chatId, from, c, rumor);
         break;
       }
+      case 'react': {
+        const chatId = this.chatIdFor(from, c);
+        if (c.g ? !this.inGroup(c.g, from) : !this.isFriend(from)) return;
+        this.applyReaction(chatId, from, c, rumor.created_at);
+        break;
+      }
+      case 'share':
+        if (!this.isFriend(from) || ageSec > 90) return;
+        if (this.shareHandler) this.shareHandler(from, c, rumor);
+        break;
       case 'watch': {
         if (ageSec > 120) return;
         const chatId = this.chatIdFor(from, c);
