@@ -39,6 +39,17 @@ export class Transport {
     this._statusTimer = setInterval(() => this.reportStatus(), 5000);
   }
 
+  // Re-open every relay socket that died while the page was frozen.
+  async reconnect() {
+    await Promise.allSettled(this.relays.map(async (u) => {
+      const r = this.pool.relays.get(u) || this.pool.relays.get(u.replace(/\/?$/, '/'));
+      if (r && r.connected) return;
+      if (r) { try { r.close(); } catch {} this.pool.relays.delete(u); this.pool.relays.delete(u.replace(/\/?$/, '/')); }
+      try { await this.pool.ensureRelay(u, { connectionTimeout: 8000 }); } catch {}
+    }));
+    this.reportStatus();
+  }
+
   // Subscribe to everything addressed to us. `since` is the newest stored
   // wrap we already have (minus slack for randomized timestamps).
   listen(pubkey, since, onWrap, onEose) {

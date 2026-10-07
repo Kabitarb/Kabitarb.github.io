@@ -64,7 +64,7 @@ function cellOf(ci, rel) {
 }
 const LUDO = {
   init(n) {
-    return { n, colors: COLOR_SETS[n] || COLOR_SETS[4].slice(0, n), tokens: Array.from({ length: n }, () => [-1, -1, -1, -1]), turn: 0, dice: 0, phase: 'roll', winner: null, sixes: 0, last: null, finished: [] };
+    return { n, colors: COLOR_SETS[n] || COLOR_SETS[4].slice(0, n), tokens: Array.from({ length: n }, () => [-1, -1, -1, -1]), turn: 0, dice: 0, phase: 'roll', winner: null, sixes: 0, last: null, finished: [], seq: 0 };
   },
   legal(st, pi) {
     if (st.phase !== 'move' || pi !== st.turn) return [];
@@ -78,7 +78,7 @@ const LUDO = {
     if (mv.a === 'roll') {
       if (st.phase !== 'roll') return false;
       const d = Number(mv.d); if (!(d >= 1 && d <= 6)) return false;
-      st.dice = d; st.last = { pi, a: 'roll', d };
+      st.dice = d; st.seq = (st.seq || 0) + 1; st.last = { pi, a: 'roll', d, seq: st.seq };
       if (d === 6) { st.sixes++; if (st.sixes >= 3) { LUDO.next(st); return true; } }
       st.phase = 'move';
       if (!LUDO.legal(st, pi).length) { if (d === 6) { st.phase = 'roll'; } else LUDO.next(st); }
@@ -91,15 +91,16 @@ const LUDO = {
       const from = toks[i];
       const to = from === -1 ? 0 : from + d;
       toks[i] = to;
-      let captured = false;
+      let captured = false; const caps = [];
       if (to <= 50) {
         const abs = (START[st.colors[pi]] + to) % 52;
         if (!SAFE.has(abs)) {
-          st.tokens.forEach((ot, op) => { if (op === pi) return; ot.forEach((p, k) => { if (p >= 0 && p <= 50 && (START[st.colors[op]] + p) % 52 === abs) { ot[k] = -1; captured = true; } }); });
+          st.tokens.forEach((ot, op) => { if (op === pi) return; ot.forEach((p, k) => { if (p >= 0 && p <= 50 && (START[st.colors[op]] + p) % 52 === abs) { caps.push({ pi: op, i: k, from: p }); ot[k] = -1; captured = true; } }); });
         }
       }
       const finished = to === 56;
-      st.last = { pi, a: 'move', i, from, to, captured };
+      st.seq = (st.seq || 0) + 1;
+      st.last = { pi, a: 'move', i, from, to, captured, caps, finished, seq: st.seq };
       if (toks.every((p) => p === 56)) {
         st.finished.push(pi);
         if (st.winner === null) st.winner = pi;
@@ -269,6 +270,21 @@ export function renderTTT(s, myIdx, nameOf) {
     ${TTT.over(st) ? '<button class="btn primary small" data-game-act="again">Play again</button>' : ''}`;
 }
 
+// Board coordinates of a token (for hop animations in the UI). pos -1 = base.
+export function ludoXY(st, pi, i, pos, C = 30) {
+  const ci = st.colors[pi];
+  if (pos === -1) { const [ox, oy] = BASE_ORIGIN[ci]; const [bx, by] = BASE_SPOTS[i]; return [(ox + bx + 0.5) * C, (oy + by + 0.5) * C]; }
+  if (pos === 56) { const cx = 7.5 * C; return [cx + (ci % 2 ? 0 : (ci === 0 ? -20 : 20)), cx + (ci % 2 ? (ci === 1 ? -20 : 20) : 0)]; }
+  const [c, r] = cellOf(ci, pos); return [(c + 0.5) * C, (r + 0.5) * C];
+}
+// Would moving token i capture someone? (for hints)
+export function ludoCaptures(st, pi, i) {
+  const pos = st.tokens[pi][i]; const to = pos === -1 ? 0 : pos + st.dice;
+  if (to > 50) return false;
+  const abs = (START[st.colors[pi]] + to) % 52;
+  if (SAFE.has(abs)) return false;
+  return st.tokens.some((ot, op) => op !== pi && ot.some((p) => p >= 0 && p <= 50 && (START[st.colors[op]] + p) % 52 === abs));
+}
 export function renderLudo(s, myIdx, nameOf) {
   const st = s.state, C = 30, S = 15 * C;
   let svg = `<svg viewBox="0 0 ${S} ${S}" class="ludo">`;
@@ -285,7 +301,7 @@ export function renderLudo(s, myIdx, nameOf) {
     const startOf = START.indexOf(i);
     const fill = startOf >= 0 ? colorFill(startOf) : '#fff';
     svg += `<rect x="${c * C}" y="${r * C}" width="${C}" height="${C}" fill="${fill}" stroke="#c9d1db" stroke-width="1.2"/>`;
-    if (SAFE.has(i) && startOf < 0) svg += `<text x="${(c + 0.5) * C}" y="${(r + 0.5) * C + 6}" text-anchor="middle" font-size="18" fill="#9aa5b1">★</text>`;
+    if (SAFE.has(i) && startOf < 0) svg += `<text class="safe-star" x="${(c + 0.5) * C}" y="${(r + 0.5) * C + 6}" text-anchor="middle" font-size="18" fill="#9aa5b1">★</text>`;
   });
   HOME_COL.forEach((cells, ci) => { for (const [c, r] of cells) svg += `<rect x="${c * C}" y="${r * C}" width="${C}" height="${C}" fill="${colorFill(ci)}" opacity=".85" stroke="#c9d1db" stroke-width="1.2"/>`; });
   const cx = 7.5 * C, m = 6 * C, M = 9 * C;
@@ -300,11 +316,17 @@ export function renderLudo(s, myIdx, nameOf) {
       let x, y;
       if (pos === -1) { const [ox, oy] = BASE_ORIGIN[ci]; const [bx, by] = BASE_SPOTS[i]; x = (ox + bx + 0.5) * C; y = (oy + by + 0.5) * C; }
       else { const [c, r] = cellOf(ci, pos); const key = c + ',' + r; const k = occupancy[key] = (occupancy[key] || 0) + 1; x = (c + 0.5) * C + ((k - 1) % 2) * 7 - 3; y = (r + 0.5) * C + Math.floor((k - 1) / 2) * 7 - 3; if (pos === 56) { x = cx + (ci % 2 ? 0 : (ci === 0 ? -20 : 20)); y = cx + (ci % 2 ? (ci === 1 ? -20 : 20) : 0); } }
-      placed.push({ x, y, ci, pi, i, can: pi === myIdx && legal.has(i), mine: pi === myIdx });
+      const can = pi === myIdx && legal.has(i);
+      placed.push({ x, y, ci, pi, i, pos, can, cap: can && ludoCaptures(st, pi, i), mine: pi === myIdx });
     });
   });
+  // where legal tokens would land (ghost targets)
+  for (const t of placed) if (t.can) {
+    const to = t.pos === -1 ? 0 : t.pos + st.dice; const [tx, ty] = ludoXY(st, t.pi, t.i, to, C);
+    svg += `<circle class="target ${t.cap ? 'cap' : ''}" cx="${tx}" cy="${ty}" r="${C * 0.42}" fill="none" stroke="${t.cap ? '#ff4d5e' : colorFill(t.ci)}" stroke-width="3" stroke-dasharray="5 4"/>`;
+  }
   for (const t of placed) {
-    svg += `<g class="tok ${t.can ? 'can' : ''}" ${t.can ? `data-tok="${t.i}"` : ''}><circle cx="${t.x}" cy="${t.y}" r="${C * 0.4}" fill="${colorFill(t.ci)}" stroke="${t.can ? '#fff' : 'rgba(0,0,0,.5)'}" stroke-width="${t.can ? 3.5 : 2}"/><circle cx="${t.x - 3}" cy="${t.y - 3}" r="${C * 0.14}" fill="#fff" opacity=".7"/></g>`;
+    svg += `<g class="tok ${t.can ? 'can' : ''} ${t.cap ? 'cap' : ''} ${t.pos === 56 ? 'home' : ''}" data-key="${t.pi}-${t.i}" ${t.can ? `data-tok="${t.i}"` : ''} style="--tx:${t.x}px;--ty:${t.y}px"><circle cx="0" cy="${C * 0.08}" r="${C * 0.4}" fill="rgba(0,0,0,.25)"/><circle cx="0" cy="0" r="${C * 0.4}" fill="${colorFill(t.ci)}" stroke="${t.can ? '#fff' : 'rgba(0,0,0,.5)'}" stroke-width="${t.can ? 3.5 : 2}"/><circle cx="-3" cy="-3" r="${C * 0.14}" fill="#fff" opacity=".7"/></g>`;
   }
   svg += '</svg>';
   const over = st.phase === 'done' || (st.winner !== null && st.finished.length >= st.n - 1);
@@ -317,8 +339,9 @@ export function renderLudo(s, myIdx, nameOf) {
     else status = `${turnName} turn — rolled ${st.dice}${myTurn ? ', pick a token' : ''}`;
   }
   const players = s.players.map((p, i) => `<span class="ludo-player ${st.turn === i && !over ? 'active' : ''}" style="--c:${colorFill(st.colors[i])}"><i></i>${esc(nameOf(p))}${st.finished.includes(i) ? ' 🏁' : ''}</span>`).join('');
-  const dice = `<button class="dice ${myTurn && st.phase === 'roll' ? 'can' : ''}" data-game-act="roll" ${myTurn && st.phase === 'roll' ? '' : 'disabled'}>${st.dice ? DICE[st.dice] : '🎲'}</button>`;
-  return `<div class="ludo-players">${players}</div>${svg}<div class="ludo-bar">${dice}<div class="game-status">${status}</div></div>`;
+  const dice = `<button class="dice ${myTurn && st.phase === 'roll' ? 'can' : ''}" data-game-act="roll" data-d="${st.dice || 0}" ${myTurn && st.phase === 'roll' ? '' : 'disabled'} aria-label="Dice"><span class="cube"><i class="f1"></i><i class="f2"></i><i class="f3"></i><i class="f4"></i><i class="f5"></i><i class="f6"></i></span></button>`;
+  const turnColor = colorFill(st.colors[st.turn]);
+  return `<div class="ludo-players">${players}</div>${svg}<div class="ludo-bar" style="--turn:${turnColor}">${dice}<div class="game-status">${status}</div></div>`;
 }
 const DICE = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 export const ENGINE = ENGINES;

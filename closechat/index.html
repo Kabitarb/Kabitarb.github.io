@@ -36,17 +36,16 @@
     </form>
 
     <form id="forgot-form" class="auth-form hidden" autocomplete="on">
-      <h3 class="auth-h">Reset password</h3>
+      <h2>Reset password</h2>
+      <p class="tiny muted" id="forgot-hint">Paste the recovery link (or key) you saved from Settings. No email needed.</p>
       <input id="forgot-user" type="text" placeholder="Username" autocapitalize="none" autocomplete="username" required>
-      <div class="seg" id="forgot-mode"><button type="button" class="active" data-m="email">Recovery email</button><button type="button" data-m="key">Recovery key</button></div>
-      <div id="forgot-email-step">
+      <div id="forgot-key-step">
+        <input id="forgot-key" type="text" placeholder="Recovery link or key" autocapitalize="none" autocomplete="off" spellcheck="false">
+      </div>
+      <div id="forgot-email-step" class="hidden">
         <input id="forgot-email" type="email" placeholder="Recovery email" autocomplete="email">
         <button class="btn primary" type="button" id="forgot-send">Send code</button>
         <div id="forgot-code-row" class="hidden"><input id="forgot-code" type="text" inputmode="numeric" placeholder="6-digit code from the email" autocomplete="one-time-code" maxlength="6"><p class="tiny muted">Check your inbox (and spam). The code expires in 15 minutes.</p></div>
-      </div>
-      <div id="forgot-key-step" class="hidden">
-        <input id="forgot-key" type="text" placeholder="Recovery key (XXXX-XXXX-…)" autocapitalize="characters" autocomplete="off" spellcheck="false">
-        <p class="tiny muted">The 56-character key from Settings → Account &amp; security.</p>
       </div>
       <div id="forgot-new" class="hidden">
         <input id="forgot-pass" type="password" placeholder="New password (12+ characters)" autocomplete="new-password" minlength="12">
@@ -55,7 +54,7 @@
       <button class="btn primary" type="submit" id="forgot-submit">Continue</button>
       <div class="auth-error" id="forgot-error"></div>
       <div class="progress hidden" id="forgot-progress"><div></div></div>
-      <a href="#" class="link" id="forgot-back">Back to log in</a>
+      <div class="auth-links"><a href="#" class="link hidden" id="forgot-use-email">Use recovery email instead</a><a href="#" class="link" id="forgot-back">Back to log in</a></div>
     </form>
 
     <form id="signup-form" class="auth-form hidden" autocomplete="on">
@@ -115,7 +114,6 @@
         <div class="chat-title"><div class="name" id="chat-name"></div><div class="sub" id="chat-sub">End-to-end encrypted</div></div>
         <button class="icon-btn" id="audio-call-btn" title="Voice call"><svg viewBox="0 0 24 24"><path d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25c1.1.37 2.3.57 3.6.57a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1A17 17 0 0 1 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1c0 1.25.2 2.45.57 3.57a1 1 0 0 1-.25 1.02Z"/></svg></button>
         <button class="icon-btn" id="video-call-btn" title="Video call"><svg viewBox="0 0 24 24"><path d="M3 6h12a2 2 0 0 1 2 2v2.5l4-2.5v8l-4-2.5V16a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Z"/></svg></button>
-        <button class="icon-btn" id="together-btn" title="Watch & play together"><svg viewBox="0 0 24 24"><path d="M7 6h10a5 5 0 0 1 5 5v2a5 5 0 0 1-5 5h-1.5l-2.1-2.5h-2.8L8.5 18H7a5 5 0 0 1-5-5v-2a5 5 0 0 1 5-5Zm1 3v2H6v2h2v2h2v-2h2v-2h-2V9Zm8 0a1.2 1.2 0 1 0 0 2.4A1.2 1.2 0 0 0 16 9Zm2 3a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Z"/></svg></button>
         <button class="icon-btn" id="chat-menu-btn" title="More"><svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="12" cy="19" r="2"/></svg></button>
       </header>
       <div class="request-banner pending hidden" id="pending-banner">
@@ -135,7 +133,7 @@
       <div class="picker hidden" id="picker"><div class="picker-tabs" id="picker-tabs"></div><div class="picker-body" id="picker-body"></div></div>
       <div class="left-note hidden" id="left-note">You are no longer in this group.</div>
       <footer class="composer" id="composer">
-        <button class="icon-btn" id="attach-btn" title="Send photo or video"><svg viewBox="0 0 24 24"><path d="M4 5h3l1.5-2h7L17 5h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm8 4a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z"/></svg></button>
+        <button class="icon-btn plus" id="plus-btn" title="More"><svg viewBox="0 0 24 24"><path d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6Z"/></svg></button>
         <input type="file" id="file-input" accept="image/*,video/*" hidden>
         <textarea id="input" rows="1" placeholder="Message"></textarea>
         <button class="icon-btn" id="emoji-btn" title="Emoji"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM7 14h10a5 5 0 0 1-10 0Z"/></svg></button>
@@ -164,6 +162,7 @@
     <button class="round hidden" id="share-btn" title="Share screen"><svg viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-6v2h3v2H7v-2h3v-2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm8 3-4 4h3v4h2v-4h3Z"/></svg></button>
     <button class="round hidden" id="call-game-btn" title="Play a game"><svg viewBox="0 0 24 24"><path d="M7 6h10a5 5 0 0 1 5 5v2a5 5 0 0 1-5 5h-1.5l-2.1-2.5h-2.8L8.5 18H7a5 5 0 0 1-5-5v-2a5 5 0 0 1 5-5Zm1 3v2H6v2h2v2h2v-2h2v-2h-2V9Zm8 0a1.2 1.2 0 1 0 0 2.4A1.2 1.2 0 0 0 16 9Zm2 3a1.2 1.2 0 1 0 0 2.4 1.2 1.2 0 0 0 0-2.4Z"/></svg></button>
     <button class="round" id="call-watch-btn" title="Watch together"><svg viewBox="0 0 24 24"><path d="M4 5h16a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-5l1 2H8l1-2H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Zm6 3.5v6l5-3Z"/></svg></button>
+    <button class="round" id="call-share-btn" title="Listen together (music/video from this device)"><svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3Z"/></svg></button>
     <button class="round danger" id="hangup-btn" title="End call"><svg viewBox="0 0 24 24"><path d="M12 9c-2.9 0-5.6.6-8 1.7-.5.2-.8.8-.7 1.4l.9 3.3c.1.6.7 1 1.3.9 1.1-.3 2.2-.5 3.4-.6.5 0 .9-.5.9-1v-2.3c.7-.1 1.4-.2 2.2-.2s1.5.1 2.2.2v2.3c0 .5.4 1 .9 1 1.2.1 2.3.3 3.4.6.6.1 1.2-.3 1.3-.9l.9-3.3c.1-.6-.2-1.2-.7-1.4C17.6 9.6 14.9 9 12 9Z"/></svg></button>
   </div>
   <div class="call-controls hidden" id="incoming-controls">
@@ -183,6 +182,18 @@
   <header><span class="ptitle" id="game-title">Game</span><button class="icon-btn" id="game-hide" title="Minimize game"><svg viewBox="0 0 24 24"><path d="M12 16.5 4.5 9 6 7.5l6 6 6-6L19.5 9Z"/></svg></button><button class="btn danger small" id="game-quit">Leave</button></header>
   <div class="game-body" id="game-body"></div>
 </div>
+<div id="share" class="panel hidden">
+  <header><span class="ptitle" id="share-title">Listening together</span><button class="icon-btn" id="share-min" title="Minimize"><svg viewBox="0 0 24 24"><path d="M12 16.5 4.5 9 6 7.5l6 6 6-6L19.5 9Z"/></svg></button><button class="btn danger small" id="share-stop">Stop</button></header>
+  <div class="share-body" id="share-body">
+    <div class="share-art" id="share-art"><span>🎵</span></div>
+    <video id="share-local" playsinline controls class="hidden"></video>
+    <video id="share-remote" autoplay playsinline class="hidden"></video>
+    <div class="share-meta"><b id="share-name">—</b><span id="share-sub" class="muted"></span></div>
+    <div class="share-prog"><i id="share-prog"></i></div>
+    <div class="share-ctl" id="share-ctl"></div>
+  </div>
+</div>
+<input type="file" id="share-input" accept="audio/*,video/*" hidden>
 <div id="invite-bar" class="invite-bar hidden"><span id="invite-text"></span><button class="btn primary small" id="invite-join">Join</button><button class="btn ghost small" id="invite-dismiss">Later</button></div>
 <input type="file" id="avatar-input" accept="image/*" hidden>
 
