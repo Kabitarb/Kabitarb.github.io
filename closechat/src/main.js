@@ -810,14 +810,13 @@ function openRecoveryKey(firstRun = false) {
   const key = encodeRecoveryKey(accountSk);
   const link = recoveryLink(key, app.state.profile.username);
   showModal(`<h3>${firstRun ? 'Save your recovery link' : 'Recovery link'}</h3>
-    <p class="muted tiny" style="margin:0 0 10px">${firstRun ? 'Forgot your password one day? Open this link and set a new one. There is no other way back in, so keep it somewhere safe (notes app, password manager).' : 'Open this link to reset your password without email. Anyone with it can log in as you — keep it private.'}</p>
+    <p class="muted tiny" style="margin:0 0 10px">${firstRun ? 'Forgot your password one day? Open this link and set a new one. There is no other way back in, so keep it somewhere safe (notes app, password manager).' : 'Open this link to reset your password without email.'} <b>It contains your account key: anyone who has it can log in as you. Never send it in a chat, email or message.</b></p>
     <div class="rk-box" id="rkey-text">${esc(link)}</div>
-    <div class="rk-actions"><button class="btn primary" id="rk-copy">Copy link</button>${navigator.share ? '<button class="btn ghost" id="rk-share">Save / share…</button>' : ''}</div>
+    <div class="rk-actions"><button class="btn primary" id="rk-copy">Copy link</button></div>
     <details class="tiny muted" style="margin-top:10px"><summary>Show the key only</summary><div class="rk-box" style="margin-top:6px">${key}</div></details>
     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn ghost" id="rk-close">${firstRun ? 'Later' : 'Close'}</button></div>`);
   $('rk-close').onclick = hideModal;
   $('rk-copy').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Recovery link copied'); } catch { toast('Select the link and copy it manually'); } };
-  const sh = $('rk-share'); if (sh) sh.onclick = () => navigator.share({ title: 'Chatly recovery link', text: 'My Chatly password recovery link — keep private', url: link }).catch(() => {});
 }
 async function openRecoveryEmail() {
   const p = app.state.profile; const u = p.username;
@@ -1915,7 +1914,11 @@ function wireShare() {
   });
   if (shareWired) return; shareWired = true;
   const lv = $('share-local');
-  const push = () => { if (share.role !== 'host') return; share.sync(!lv.paused, lv.currentTime, lv.duration); updateShareProg(!lv.paused, lv.currentTime, lv.duration); lastShareSync = Date.now(); };
+  const push = () => {
+    if (share.role !== 'host') return;
+    if (share.state !== 'active') { if (!lv.paused) lv.pause(); return; }   // playback starts when the friend joins
+    share.sync(!lv.paused, lv.currentTime, lv.duration); updateShareProg(!lv.paused, lv.currentTime, lv.duration); lastShareSync = Date.now();
+  };
   ['play', 'pause', 'seeked', 'ended'].forEach((ev) => lv.addEventListener(ev, push));
   lv.addEventListener('timeupdate', () => { if (share.role !== 'host') return; updateShareProg(!lv.paused, lv.currentTime, lv.duration); if (Date.now() - lastShareSync > 4000) push(); });
   $('share-stop').onclick = () => share.stop();
@@ -2059,7 +2062,9 @@ function renderCall(info) {
 
 /* ---------------- boot ---------------- */
 applyTheme();
+const RECOVER_KEY = 'closechat:pendingRecover';
 let pendingRecover = null;
+try { const pr = sessionStorage.getItem(RECOVER_KEY); if (pr) { sessionStorage.removeItem(RECOVER_KEY); pendingRecover = JSON.parse(pr); } } catch {}
 function applyPendingRecover() {
   if (!pendingRecover || $('auth').classList.contains('hidden')) return;
   const { key, u } = pendingRecover; pendingRecover = null;
@@ -2071,8 +2076,17 @@ function parseHash() {
   if (/#recover=/.test(location.hash)) {
     const r = parseRecoveryInput(location.hash);
     history.replaceState(null, '', location.pathname + location.search);
-    if (app) { toast('Log out first to use a recovery link'); return; }
-    pendingRecover = r; applyPendingRecover(); return;
+    if (!r || !r.key) { toast('That recovery link is not valid', 'error'); return; }
+    pendingRecover = r;
+    if (app) {
+      confirmSheet('Reset password with this link?', `You are signed in as ${app.state.profile.username || 'this account'}. Log out and continue to the password reset?`, 'Log out & continue', false).then((ok) => {
+        if (!ok) { pendingRecover = null; return; }
+        sessionStorage.setItem(RECOVER_KEY, JSON.stringify(r));
+        logout();
+      });
+      return;
+    }
+    applyPendingRecover(); return;
   }
   const m = location.hash.match(/#add=([^&]+)(?:&n=([^&]+))?/);
   if (!m) return;
@@ -2088,7 +2102,8 @@ window.addEventListener('beforeunload', () => { if (store) store.flush(); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 (async () => {
   const saved = session.get();
-  if (saved) {
+  // A recovery link opened on a still-signed-in device goes straight to the reset form.
+  if (saved && !pendingRecover) {
     try { await startApp(hexToBytes(saved), null); return; } catch (e) { console.error(e); session.clear(); }
   }
   $('auth').classList.remove('hidden');

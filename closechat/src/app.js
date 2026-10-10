@@ -221,6 +221,8 @@ export class App extends EventTarget {
     chat.messages.sort((a, b) => a.ts - b.ts);
     if (m.ts > chat.lastTs) chat.lastTs = m.ts;
     if (chat.messages.length > 2000) chat.messages.splice(0, chat.messages.length - 2000);
+    const q = this.rxPending && this.rxPending.get(m.id);
+    if (q) { this.rxPending.delete(m.id); for (const r of q) this.applyReaction(r.chatId, r.from, r.c, r.ts); }
   }
 
   // Copies of our own control messages are also wrapped to ourselves so a
@@ -253,7 +255,7 @@ export class App extends EventTarget {
       if (this.gameHandler) this.gameHandler(this.chatIdFor(this.pk, c), this.pk, c, rumor);
     } else if (c.t === 'react') {
       const chatId = c.g ? 'g:' + c.g : to;
-      if (chatId && chatId !== this.pk) this.applyReaction(chatId, this.pk, c, rumor.created_at);
+      if (chatId && chatId !== this.pk) this.applyReaction(chatId, this.pk, c, this.rxTs(c, rumor));
     } else if (c.t === 'calllog' && c.e && typeof c.e === 'object' && /^[0-9a-f]{64}$/.test(c.e.peer || '')) {
       const e = c.e;
       this.logCall({ id: String(e.id || rumor.id).slice(0, 64), peer: e.peer, dir: e.dir === 'out' ? 'out' : 'in', video: !!e.video, ts: Number(e.ts) || rumor.created_at * 1000, dur: Number(e.dur) || 0, missed: !!e.missed, reason: String(e.reason || '').slice(0, 20) }, true);
@@ -265,14 +267,32 @@ export class App extends EventTarget {
 
   /* ---------- reactions ---------- */
   // m.rx = { pk: { e, ts } }; an empty emoji removes, older copies never win.
+  // ts is in milliseconds (the sender's clock, bounded by the wrap's created_at)
+  // so a quick add-then-remove keeps its order on every device.
+  rxTs(c, rumor) {
+    const base = rumor.created_at * 1000, t = Number(c.ts) || 0;
+    return t && Math.abs(t - base) < 120000 ? t : base;
+  }
   applyReaction(chatId, from, c, ts) {
     const mid = String(c.id || ''); if (!/^[0-9a-f]{64}$/.test(mid)) return;
     const chat = this.state.chats[chatId]; if (!chat) return;
-    const m = chat.messages.find((x) => x.id === mid); if (!m) return;
+    const m = chat.messages.find((x) => x.id === mid);
+    if (!m) {
+      // Relays can deliver a reaction before the message it belongs to: keep it briefly.
+      if (!this.rxPending) this.rxPending = new Map();
+      const now = Date.now();
+      if (this.rxPending.size >= 200) for (const [k, v] of this.rxPending) if (now - v[0].at > 600000) this.rxPending.delete(k);
+      if (this.rxPending.size >= 200) return;
+      const list = this.rxPending.get(mid) || [];
+      list.push({ chatId, from, c: { id: mid, e: c.e }, ts, at: now });
+      this.rxPending.set(mid, list.slice(-20));
+      return;
+    }
     const e = typeof c.e === 'string' ? c.e.slice(0, 16) : '';
     m.rx = m.rx || {};
     const prev = m.rx[from];
-    if (prev && prev.ts > ts) return;
+    const norm = (t) => (t < 1e12 ? t * 1000 : t);
+    if (prev && norm(prev.ts) > ts) return;
     if (e) m.rx[from] = { e, ts }; else delete m.rx[from];
     if (!Object.keys(m.rx).length) delete m.rx;
     this.emit('reaction', { chatId, mid, from, e, fresh: this.ready && from !== this.pk });
@@ -282,10 +302,10 @@ export class App extends EventTarget {
     const m = chat.messages.find((x) => x.id === mid); if (!m) return;
     const cur = m.rx && m.rx[this.pk] ? m.rx[this.pk].e : '';
     const next = cur === e ? '' : e;
-    const ts = Math.floor(Date.now() / 1000);
+    const ts = Date.now();
     this.applyReaction(chatId, this.pk, { id: mid, e: next }, ts);
     this.store.save();
-    this.sendChatControl(chatId, { t: 'react', id: mid, e: next }, false, true);
+    this.sendChatControl(chatId, { t: 'react', id: mid, e: next, ts }, false, true);
     return next;
   }
 
@@ -387,7 +407,7 @@ export class App extends EventTarget {
       case 'react': {
         const chatId = this.chatIdFor(from, c);
         if (c.g ? !this.inGroup(c.g, from) : !this.isFriend(from)) return;
-        this.applyReaction(chatId, from, c, rumor.created_at);
+        this.applyReaction(chatId, from, c, this.rxTs(c, rumor));
         break;
       }
       case 'share':
