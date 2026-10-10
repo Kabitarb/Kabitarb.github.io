@@ -43,7 +43,11 @@ export class ShareManager extends EventTarget {
       this.emit('state', this.info());
     };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected') this.setState('active');
+      if (pc.connectionState === 'connected') {
+        this.setState('active');
+        // Host playback is held until here so the guest hears the file from the start.
+        if (this.role === 'host' && this.el) { try { this.el.currentTime = 0; } catch {} this.el.play().catch(() => {}); }
+      }
       else if (pc.connectionState === 'failed') this.end('failed');
       else if (pc.connectionState === 'disconnected') { clearTimeout(this.timer); this.timer = setTimeout(() => { if (pc.connectionState === 'disconnected') this.end('lost'); }, 8000); }
     };
@@ -102,7 +106,6 @@ export class ShareManager extends EventTarget {
       await pc.setLocalDescription(offer);
       await this.signal({ a: 'offer', sdp: offer.sdp, title: this.title, video: this.hasVideo, dur: Math.round(el.duration || 0) });
       this.timer = setTimeout(() => { if (this.state === 'offering') this.end('no-answer'); }, OFFER_TIMEOUT);
-      el.play().catch(() => {});
     } catch (e) {
       this.emit('error', e.message || String(e));
       this.end('error', false);

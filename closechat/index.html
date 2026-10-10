@@ -174,7 +174,7 @@
 <!-- ============ TOGETHER PANELS ============ -->
 <div id="watch" class="panel hidden">
   <header><span class="ptitle" id="watch-title">Watching together</span><button class="btn ghost small" id="watch-change">Change clip</button><button class="icon-btn" id="watch-close" title="Stop watching"><svg viewBox="0 0 24 24"><path d="m6 5 13 13-1 1L5 6Zm13 1L6 19l-1-1L18 5Z"/></svg></button></header>
-  <div class="watch-frame"><iframe id="watch-frame" title="Shared clip" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
+  <div class="watch-frame"><video id="watch-video" class="hidden" playsinline controls></video><iframe id="watch-frame" title="Shared clip" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe></div>
   <div class="pfoot" id="watch-foot"></div>
 </div>
 <div id="game" class="panel hidden">

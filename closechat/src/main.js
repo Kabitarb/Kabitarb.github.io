@@ -11,6 +11,7 @@ import { PACKS, stickerIds, stickerSvg, animIds, animOf, animHtml } from './stic
 import { GameManager, GAMES, renderTTT, renderLudo, ludoXY } from './games.js';
 import { ShareManager } from './share.js';
 import { WatchManager, parseMedia, MEDIA_RE } from './watch.js';
+import { TV_CHANNELS, TV_CATS, tvUrl, tvHue } from './tv.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -448,13 +449,14 @@ function wireApp() {
     const onScreen = app.openChat === chatId && !document.hidden;
     if (!onScreen) {
       if (s.sounds) tones.notify();
-      if (s.notifications && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+      if (s.notifications && document.hidden) {
         const body = (isGroupId(chatId) ? app.nameOf(pk) + ': ' : '') + previewOf(message).slice(0, 100);
-        const n = new Notification(app.nameOf(chatId), { body, tag: chatId, icon: 'icons/icon-192.png' });
-        n.onclick = () => { window.focus(); openChat(chatId); n.close(); };
+        messageNotification(app.nameOf(chatId), body, chatId);
       }
     } else if (!atBottom()) { unseen++; updateJump(); }
+    updateBadge();
   });
+
   app.addEventListener('request', (e) => { if (e.detail.fresh) toast(`New request from ${app.nameOf(e.detail.pk)}`); });
   app.addEventListener('friend', (e) => {
     if (e.detail.accepted) { toast(`${app.nameOf(e.detail.pk)} accepted your request`); haptic(); }
@@ -463,6 +465,8 @@ function wireApp() {
     if (app.openChat === e.detail.pk) { setAvatar($('chat-avatar'), e.detail.pk); $('chat-name').textContent = app.nameOf(e.detail.pk); renderedFor = null; renderChat(); }
   });
   app.addEventListener('presence', () => { scheduleRender(); });
+  app.addEventListener('sent', (e) => nudge(e.detail.to, 'message'));
+  if (settings.get().push && Date.now() - (settings.get().pushAt || 0) > 86400000) setTimeout(() => setPush(true, true), 4000);
   app.addEventListener('me', () => { scheduleRender(); });
   app.addEventListener('restored', (e) => toast(`Restored ${e.detail.n} friend${e.detail.n === 1 ? '' : 's'} from your encrypted backup`));
   app.addEventListener('media', () => { if (app.openChat) { renderedFor = null; renderChat(); } });
@@ -549,6 +553,7 @@ function renderAll() {
   const b = $('req-badge'); b.textContent = pending; b.classList.toggle('hidden', !pending);
   const totalUnread = Object.entries(app.state.chats).filter(([id]) => app.canChat(id)).reduce((a, [, c]) => a + c.unread, 0);
   document.title = (totalUnread ? `(${totalUnread}) ` : '') + 'Chatly';
+  updateBadge();
 }
 
 function renderChatList() {
@@ -719,6 +724,7 @@ function renderSettings() {
       <div class="srow"><span>Message notifications</span><button class="switch ${s.notifications ? 'on' : ''}" data-set="notifications"></button></div>
       <div class="srow"><span>Sounds</span><button class="switch ${s.sounds ? 'on' : ''}" data-set="sounds"></button></div>
       <div class="srow"><span>Vibration</span><button class="switch ${s.haptics ? 'on' : ''}" data-set="haptics"></button></div>
+      <div class="srow" style="flex-direction:column;align-items:stretch;gap:4px"><div class="row" style="justify-content:space-between;align-items:center"><span>When the app is closed</span><button class="switch ${s.push ? 'on' : ''}" data-set="push"></button></div><span class="tiny muted">${pushHint()}</span></div>
     </div>
     <h4>Network</h4>
     <div class="card"><div class="srow" style="flex-direction:column;align-items:stretch;gap:8px"><span>Relays (one per line). Relays only ever see encrypted blobs.</span><textarea id="relay-text">${esc(relays)}</textarea><div class="row" style="justify-content:flex-end;gap:8px;display:flex"><button class="btn ghost small" id="relay-reset">Reset</button><button class="btn primary small" id="relay-save">Save & reconnect</button></div></div>
@@ -730,7 +736,7 @@ function renderSettings() {
       <div class="srow clickable" id="s-logout"><span>Log out</span><span class="muted">Keeps encrypted history</span></div>
       <div class="srow clickable" id="s-wipe"><span class="danger">Delete all data on this device</span></div>
     </div>
-    <p class="tiny muted" style="margin-top:16px">Chatly v6 · Your password unlocks your encryption key. Forgot it? Use your recovery link.</p>`;
+    <p class="tiny muted" style="margin-top:16px">Chatly v7 · Your password unlocks your encryption key. Forgot it? Use your recovery link.</p>`;
   el.querySelector('.profile .avatar').onclick = () => openAvatarPicker();
   $('s-photo').onclick = () => openAvatarPicker();
   $('s-avatar').onclick = () => openAvatarPicker(true);
@@ -754,6 +760,7 @@ function renderSettings() {
       if (k === 'notifications' && v && 'Notification' in window) Notification.requestPermission().catch(() => {});
       if (k === 'discoverable') { app.publishDirectory(v); toast(v ? 'Friends can now find you by username' : 'Removed from username lookup'); }
       if (k === 'haptics' && v) haptic(20);
+      if (k === 'push') setPush(v);
       renderSettings();
     };
   });
@@ -810,14 +817,13 @@ function openRecoveryKey(firstRun = false) {
   const key = encodeRecoveryKey(accountSk);
   const link = recoveryLink(key, app.state.profile.username);
   showModal(`<h3>${firstRun ? 'Save your recovery link' : 'Recovery link'}</h3>
-    <p class="muted tiny" style="margin:0 0 10px">${firstRun ? 'Forgot your password one day? Open this link and set a new one. There is no other way back in, so keep it somewhere safe (notes app, password manager).' : 'Open this link to reset your password without email. Anyone with it can log in as you — keep it private.'}</p>
+    <p class="muted tiny" style="margin:0 0 10px">${firstRun ? 'Forgot your password one day? Open this link and set a new one. There is no other way back in, so keep it somewhere safe (notes app, password manager).' : 'Open this link to reset your password without email.'} <b>It contains your account key: anyone who has it can log in as you. Never send it in a chat, email or message.</b></p>
     <div class="rk-box" id="rkey-text">${esc(link)}</div>
-    <div class="rk-actions"><button class="btn primary" id="rk-copy">Copy link</button>${navigator.share ? '<button class="btn ghost" id="rk-share">Save / share…</button>' : ''}</div>
+    <div class="rk-actions"><button class="btn primary" id="rk-copy">Copy link</button></div>
     <details class="tiny muted" style="margin-top:10px"><summary>Show the key only</summary><div class="rk-box" style="margin-top:6px">${key}</div></details>
     <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn ghost" id="rk-close">${firstRun ? 'Later' : 'Close'}</button></div>`);
   $('rk-close').onclick = hideModal;
   $('rk-copy').onclick = async () => { try { await navigator.clipboard.writeText(link); toast('Recovery link copied'); } catch { toast('Select the link and copy it manually'); } };
-  const sh = $('rk-share'); if (sh) sh.onclick = () => navigator.share({ title: 'Chatly recovery link', text: 'My Chatly password recovery link — keep private', url: link }).catch(() => {});
 }
 async function openRecoveryEmail() {
   const p = app.state.profile; const u = p.username;
@@ -1101,8 +1107,8 @@ $('jump-btn').onclick = () => { const box = $('messages'); box.scrollTo({ top: b
 
 function mediaCard(url, out) {
   const m = parseMedia(url); if (!m) return '';
-  const label = { instagram: 'IG', youtube: '▶', tiktok: '♪' }[m.kind];
-  const name = { instagram: 'Instagram reel', youtube: 'YouTube', tiktok: 'TikTok' }[m.kind];
+  const label = { instagram: 'IG', youtube: '▶', tiktok: '♪', tv: '📺', hls: '📺' }[m.kind];
+  const name = { instagram: 'Instagram reel', youtube: 'YouTube', tiktok: 'TikTok', tv: m.name ? `Live TV · ${m.name}` : 'Live TV channel', hls: 'Live stream' }[m.kind];
   return `<div class="media-card"><span class="thumb ${m.kind}">${label}</span><span>${name}</span><button class="btn primary small" data-watch="${esc(m.url)}">Watch together</button></div>`;
 }
 
@@ -1523,6 +1529,7 @@ async function openPlus(id) {
     <button data-p="sticker"><span class="ic sticker"><svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-3.5 7a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm7 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3ZM7.2 14h9.6c-.7 2.4-2.6 4-4.8 4s-4.1-1.6-4.8-4Z"/></svg></span>Stickers</button>
     <button data-p="games"><span class="ic games"><svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3 3.5A1.5 1.5 0 1 0 8 9.5a1.5 1.5 0 0 0 0-3Zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm-4 4A1.5 1.5 0 1 0 12 13.5a1.5 1.5 0 0 0 0-3Zm-4 4A1.5 1.5 0 1 0 8 17.5a1.5 1.5 0 0 0 0-3Zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg></span>Games${active ? ` · ${active}` : ''}</button>
     <button data-p="watch"><span class="ic watch"><svg viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm6 4.5v7l6-3.5-6-3.5Z"/></svg></span>Watch reel</button>
+    <button data-p="tv"><span class="ic tv"><svg viewBox="0 0 24 24"><path d="M3 6h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-6l1.5 2h-9L9 18H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm1 2v8h16V8H4Zm6.2 1.4 4.6 2.6-4.6 2.6V9.4Z"/></svg></span>Live TV</button>
     <button data-p="music" ${group ? 'disabled' : ''} title="${group ? 'One-to-one chats only' : ''}"><span class="ic music">${live ? '<svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3Z"/></svg>'}</span>${live ? 'Stop sharing' : 'Listen together'}</button>
   </div>`);
   $('plus-btn').classList.add('open');
@@ -1537,6 +1544,7 @@ async function openPlus(id) {
       else if (p === 'sticker') $('emoji-btn').click();
       else if (p === 'games') openGames(id);
       else if (p === 'watch') openWatch(id);
+      else if (p === 'tv') openTV(id);
       else if (p === 'music') { if (live) share.stop(); else startShare(id); }
     };
   });
@@ -1666,14 +1674,70 @@ function openAddFriend(tab = 'me') {
 }
 
 /* ---------------- watch together ---------------- */
-function startWatch(chatId, url) {
-  try { watch.open(chatId, url); toast('Shared with ' + app.nameOf(chatId)); } catch (e) { toast(e.message, 'error'); }
+function startWatch(chatId, url, name = '') {
+  try { watch.open(chatId, url, name); toast('Shared with ' + app.nameOf(chatId)); } catch (e) { toast(e.message, 'error'); }
 }
+function hostOf(url) { try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return ''; } }
+const myTvChannels = () => (settings.get().tvChannels || []).filter((c) => c && typeof c.url === 'string' && typeof c.name === 'string');
+async function addTvChannel() {
+  const url = await promptSheet('Add your own channel', '', 'https://…', 'Paste a channel’s live link (youtube.com/watch?v=… or youtube.com/channel/…/live) or an .m3u8 stream link from a service you have access to. Only share streams you are allowed to watch.');
+  if (!url) return false;
+  const m = parseMedia(url);
+  if (!m || !['tv', 'hls', 'youtube'].includes(m.kind)) { toast('Use a YouTube live link or an .m3u8 stream link', 'error'); return false; }
+  const name = await promptSheet('Channel name', m.name || '', hostOf(m.url) || 'My channel');
+  if (name === null) return false;
+  const list = myTvChannels().filter((c) => c.url !== m.url);
+  list.unshift({ name: (name || m.name || hostOf(m.url) || 'My channel').slice(0, 40), url: m.url });
+  settings.set({ tvChannels: list.slice(0, 50) });
+  toast('Channel saved'); return true;
+}
+// Live TV picker: official channels + the user's saved links; picking one opens it
+// for everyone in the chat through the normal Watch-together sync.
+async function openTV(id) {
+  if (!id) return;
+  let cat = 'All', q = '';
+  showModal(`<h3 style="display:flex;align-items:center;gap:8px;margin-bottom:4px">Live TV <span class="live-pill">LIVE</span></h3>
+    <p class="muted tiny" style="margin:0 0 8px">Official free live channels in their own player. Everyone in this chat watches the same channel with you.</p>
+    <div class="row"><input type="search" id="tv-q" placeholder="Search channels" autocomplete="off"></div>
+    <div class="tv-cats">${TV_CATS.map((c) => `<button type="button" data-cat="${esc(c)}" class="${c === 'All' ? 'on' : ''}">${esc(c)}</button>`).join('')}</div>
+    <div class="tv-list" id="tv-list"></div>
+    <div class="row" style="justify-content:space-between;margin-top:10px"><button class="btn ghost small" id="tv-add">+ Add your own channel</button><button class="btn ghost small" id="tv-cancel">Cancel</button></div>`);
+  const initials = (n) => n.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase();
+  const pick = (url, name) => { hideModal(); haptic(); startWatch(id, url, name); };
+  const render = () => {
+    const mine = myTvChannels().filter((c) => !q || c.name.toLowerCase().includes(q));
+    const list = TV_CHANNELS.filter((c) => (cat === 'All' || c.cat === cat) && (!q || c.name.toLowerCase().includes(q) || c.cat.toLowerCase().includes(q)));
+    let html = '';
+    if (cat === 'All' && mine.length) {
+      html += '<div class="tv-sec">My channels</div>' + mine.map((c, i) => `<button type="button" class="tv-ch" data-url="${esc(c.url)}" data-name="${esc(c.name)}"><span class="tv-logo mine">${esc(initials(c.name) || 'TV')}</span><span class="tv-meta"><b>${esc(c.name)}</b><small>${esc(hostOf(c.url))}</small></span><span class="tv-del" data-del="${i}" title="Remove">✕</span></button>`).join('') + '<div class="tv-sec">Channels</div>';
+    }
+    html += list.map((c) => `<button type="button" class="tv-ch" data-url="${tvUrl(c.id)}" data-name="${esc(c.name)}"><span class="tv-logo" style="--h:${tvHue(c.name)}">${esc(initials(c.name))}</span><span class="tv-meta"><b>${esc(c.name)}</b><small>${esc(c.cat)} · ${esc(c.lang)}</small></span><span class="live-dot"></span></button>`).join('');
+    if (!html) html = '<p class="muted tiny" style="padding:12px 8px">No channels match. Add your own below.</p>';
+    const box = $('tv-list'); if (!box) return;
+    box.innerHTML = html;
+    box.querySelectorAll('.tv-ch').forEach((b) => {
+      b.onclick = (e) => {
+        const del = e.target.closest('[data-del]');
+        if (del) { e.stopPropagation(); const l = myTvChannels(); l.splice(Number(del.dataset.del), 1); settings.set({ tvChannels: l }); haptic(); render(); return; }
+        pick(b.dataset.url, b.dataset.name);
+      };
+    });
+  };
+  render();
+  $('tv-q').oninput = (e) => { q = e.target.value.trim().toLowerCase(); render(); };
+  $('modal-body').querySelectorAll('[data-cat]').forEach((b) => {
+    b.onclick = () => { cat = b.dataset.cat; $('modal-body').querySelectorAll('[data-cat]').forEach((x) => x.classList.toggle('on', x === b)); haptic(); render(); };
+  });
+  $('tv-cancel').onclick = hideModal;
+  $('tv-add').onclick = async () => { if (await addTvChannel()) openTV(id); };
+}
+
 function wireWatch() {
   watch.addEventListener('update', renderWatch);
   watch.addEventListener('invite', (e) => {
     const { chatId, from } = e.detail;
-    $('invite-text').textContent = `${app.nameOf(from)} wants to watch a reel together${isGroupId(chatId) ? ' in ' + app.nameOf(chatId) : ''}`;
+    const md = e.detail.media || {}; const isTv = md.kind === 'tv' || md.kind === 'hls';
+    $('invite-text').textContent = `${app.nameOf(from)} wants to watch ${isTv ? (md.name ? md.name + ' (Live TV)' : 'Live TV') : 'a reel'} together${isGroupId(chatId) ? ' in ' + app.nameOf(chatId) : ''}`;
     $('invite-bar').classList.remove('hidden');
     if (settings.get().sounds) tones.notify();
     haptic(30);
@@ -1688,25 +1752,60 @@ let watchSrc = '';
 function renderWatch() {
   const s = watch.session;
   const panel = $('watch');
-  if (!s) { panel.classList.add('hidden'); $('watch-frame').src = 'about:blank'; watchSrc = ''; $('call').classList.remove('watching'); return; }
+  if (!s) { panel.classList.add('hidden'); setWatchSource(null); watchSrc = ''; $('call').classList.remove('watching'); return; }
   panel.classList.remove('hidden');
   $('call').classList.add('watching');
-  $('watch-title').textContent = `Watching with ${app.nameOf(s.chatId)}`;
-  if (watchSrc !== s.media.embed) { watchSrc = s.media.embed; $('watch-frame').src = s.media.embed; }
+  const isTv = s.media.kind === 'tv' || s.media.kind === 'hls';
+  const chName = s.media.name || (s.media.kind === 'hls' ? hostOf(s.media.url) : 'Live TV');
+  $('watch-title').textContent = isTv ? `${chName} · with ${app.nameOf(s.chatId)}` : `Watching with ${app.nameOf(s.chatId)}`;
+  $('watch-change').textContent = isTv ? 'Channels' : 'Change clip';
+  panel.querySelector('.watch-frame').classList.toggle('wide', isTv || s.media.kind === 'youtube');
+  if (watchSrc !== s.media.url) { watchSrc = s.media.url; setWatchSource(s.media); }
   const who = s.by === app.pk ? 'You' : app.nameOf(s.by);
-  $('watch-foot').innerHTML = `<span>${esc(who)} picked this ${{ instagram: 'reel', youtube: 'video', tiktok: 'TikTok' }[s.media.kind]}.</span><a href="${esc(s.media.url)}" target="_blank" rel="noopener" style="color:var(--accent)">Open in app</a>${s.media.kind === 'instagram' ? '<span>Tap the clip to play. Instagram may ask you to log in for some reels.</span>' : ''}`;
+  $('watch-foot').innerHTML = isTv
+    ? `<span>${esc(who)} picked ${esc(chName)}.</span>${s.media.kind === 'tv' ? `<a href="${esc(s.media.url)}" target="_blank" rel="noopener" style="color:var(--accent)">Open on YouTube</a><span>Plays in the channel’s own player; if it is off air YouTube shows “unavailable”.</span>` : '<span>Live stream from your saved link.</span>'}`
+    : `<span>${esc(who)} picked this ${{ instagram: 'reel', youtube: 'video', tiktok: 'TikTok' }[s.media.kind]}.</span><a href="${esc(s.media.url)}" target="_blank" rel="noopener" style="color:var(--accent)">Open in app</a>${s.media.kind === 'instagram' ? '<span>Tap the clip to play. Instagram may ask you to log in for some reels.</span>' : ''}`;
 }
+// Embeds go in the iframe; .m3u8 streams play in a <video> (natively on Safari, via hls.js elsewhere).
+let hlsInst = null;
+function setWatchSource(media) {
+  const v = $('watch-video'), f = $('watch-frame');
+  if (hlsInst) { try { hlsInst.destroy(); } catch {} hlsInst = null; }
+  v.pause(); v.removeAttribute('src'); v.load();
+  if (!media) { f.src = 'about:blank'; v.classList.add('hidden'); f.classList.remove('hidden'); return; }
+  if (media.kind !== 'hls') { v.classList.add('hidden'); f.classList.remove('hidden'); f.src = media.embed; return; }
+  f.src = 'about:blank'; f.classList.add('hidden'); v.classList.remove('hidden');
+  if (v.canPlayType('application/vnd.apple.mpegurl')) { v.src = media.url; v.play().catch(() => {}); return; }
+  loadHls().then((Hls) => {
+    if (!Hls || !Hls.isSupported()) { toast('Live streams are not supported in this browser', 'error'); return; }
+    if (watchSrc !== media.url) return;
+    hlsInst = new Hls({ enableWorker: false });
+    hlsInst.on(Hls.Events.ERROR, (_, d) => { if (d && d.fatal) toast('This stream could not be played here', 'error'); });
+    hlsInst.loadSource(media.url); hlsInst.attachMedia(v);
+    v.play().catch(() => {});
+  });
+}
+// hls.js (light build, vendored) is only fetched the first time an .m3u8 stream is opened.
+let hlsLoad = null;
+function loadHls() {
+  if (window.Hls) return Promise.resolve(window.Hls);
+  if (!hlsLoad) hlsLoad = new Promise((res) => { const sc = document.createElement('script'); sc.src = 'hls.light.min.js'; sc.onload = () => res(window.Hls); sc.onerror = () => { hlsLoad = null; res(null); }; document.head.appendChild(sc); });
+  return hlsLoad;
+}
+
 $('watch-close').onclick = () => watch.close();
 $('watch-change').onclick = async () => {
   const s = watch.session; if (!s) return;
+  if (s.media.kind === 'tv' || s.media.kind === 'hls') { openTV(s.chatId); return; }
   const url = await promptSheet('Change clip', '', 'Paste a new reel / video link');
   if (url) { try { watch.open(s.chatId, url); } catch (e) { toast(e.message, 'error'); } }
 };
 $('call-watch-btn').onclick = async () => {
   const peer = calls.peer; if (!peer) return;
   if (watch.session) { watch.close(); return; }
-  const url = await promptSheet('Watch together', '', 'Paste an Instagram reel / YouTube / TikTok link');
-  if (url) startWatch(peer, url);
+  const what = await menuSheet([{ id: 'tv', label: '📺 Live TV' }, { id: 'link', label: '▶ Paste a reel / video link' }]);
+  if (what === 'tv') openTV(peer);
+  else if (what === 'link') { const url = await promptSheet('Watch together', '', 'Paste an Instagram reel / YouTube / TikTok link'); if (url) startWatch(peer, url); }
 };
 
 /* ---------------- games ---------------- */
@@ -1915,7 +2014,11 @@ function wireShare() {
   });
   if (shareWired) return; shareWired = true;
   const lv = $('share-local');
-  const push = () => { if (share.role !== 'host') return; share.sync(!lv.paused, lv.currentTime, lv.duration); updateShareProg(!lv.paused, lv.currentTime, lv.duration); lastShareSync = Date.now(); };
+  const push = () => {
+    if (share.role !== 'host') return;
+    if (share.state !== 'active') { if (!lv.paused) lv.pause(); return; }   // playback starts when the friend joins
+    share.sync(!lv.paused, lv.currentTime, lv.duration); updateShareProg(!lv.paused, lv.currentTime, lv.duration); lastShareSync = Date.now();
+  };
   ['play', 'pause', 'seeked', 'ended'].forEach((ev) => lv.addEventListener(ev, push));
   lv.addEventListener('timeupdate', () => { if (share.role !== 'host') return; updateShareProg(!lv.paused, lv.currentTime, lv.duration); if (Date.now() - lastShareSync > 4000) push(); });
   $('share-stop').onclick = () => share.stop();
@@ -1963,6 +2066,70 @@ function setSpeaker(on) {
   if (nativeAudio) { try { nativeAudio.postMessage(on ? 'speaker' : 'earpiece'); } catch {} }
 }
 $('speaker-btn').onclick = () => { haptic(); setSpeaker(!speakerOn); };
+// System notification for a message while the app is in the background. Goes through the
+// service worker where possible (required on iOS home-screen apps), else the plain API.
+async function messageNotification(title, body, chatId) {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  try {
+    const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration());
+    if (reg) { await reg.showNotification(title, { body, tag: 'chat:' + chatId, renotify: true, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', data: { kind: 'message', chatId } }); return; }
+  } catch {}
+  try { const n = new Notification(title, { body, tag: chatId, icon: 'icons/icon-192.png' }); n.onclick = () => { window.focus(); openChat(chatId); n.close(); }; } catch {}
+}
+function updateBadge() {
+  if (!app || !('setAppBadge' in navigator)) return;
+  const n = Object.entries(app.state.chats).filter(([id]) => app.canChat(id)).reduce((a, [, c]) => a + (c.unread || 0), 0);
+  (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
+}
+/* ---------------- Web Push (closed app) ---------------- */
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const standalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+function pushHint() {
+  if (!rc.enabled) return 'Needs the Chatly push/recovery server: set its URL under Network (see server/README).';
+  if (isIOS() && !standalone()) return 'On iPhone: Safari → Share → Add to Home Screen, open Chatly from there, then turn this on.';
+  if (!('PushManager' in window) || !('serviceWorker' in navigator)) return 'Not supported in this browser.';
+  return 'Shows “New message” / “Incoming call” even when Chatly is closed. Only your public key reaches the server.';
+}
+async function pushReg() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  try { return (await navigator.serviceWorker.getRegistration()) || null; } catch { return null; }
+}
+function b64ToU8(b64) { const s = atob(b64.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(b64.length / 4) * 4, '=')); return Uint8Array.from(s, (c) => c.charCodeAt(0)); }
+async function setPush(on, quiet = false) {
+  if (!on) {
+    settings.set({ push: false });
+    try { const reg = await pushReg(); const sub = reg && await reg.pushManager.getSubscription(); if (sub) { try { await rc.pushUnsubscribe(accountSk, sub.endpoint); } catch {} await sub.unsubscribe(); } } catch {}
+    if (!quiet) toast('Notifications when closed: off');
+    return;
+  }
+  try {
+    if (!rc.enabled) throw new Error('Set the push/recovery server URL under Network first');
+    if (isIOS() && !standalone()) throw new Error('On iPhone, add Chatly to the Home Screen first (Share → Add to Home Screen) and turn this on from there');
+    const reg = await pushReg();
+    if (!reg) throw new Error('Push is not supported in this browser');
+    if ((await Notification.requestPermission()) !== 'granted') throw new Error('Allow notifications for Chatly first');
+    const info = await rc.info();
+    if (!info || !info.push) throw new Error('This server has no push support — update it (see server/README)');
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(info.push) });
+    await rc.pushSubscribe(accountSk, sub.toJSON());
+    settings.set({ push: true, pushAt: Date.now() });
+    if (!quiet) toast('You will be notified even when Chatly is closed');
+  } catch (e) {
+    settings.set({ push: false });
+    if (!quiet) { toast(e.message || 'Could not enable push', 'error'); renderSettings(); }
+  }
+}
+// Ask the push server to wake friends' closed apps; the message/call itself goes over the relays.
+const nudgedAt = new Map();
+function nudge(to, kind) {
+  if (!rc.enabled || !accountSk || !to || !to.length) return;
+  const now = Date.now();
+  const list = to.filter((p) => p && p !== app.pk && (kind === 'call' || now - (nudgedAt.get(p) || 0) > 20000));
+  if (!list.length) return;
+  list.forEach((p) => nudgedAt.set(p, now));
+  rc.pushNudge(accountSk, list, kind).catch(() => {});
+}
 async function callNotification(info) {
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const title = app.nameOf(info.peer), body = `Incoming ${info.video ? 'video' : 'voice'} call — tap to answer`;
@@ -1977,7 +2144,10 @@ async function closeCallNotification() {
   try { const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration()); if (reg) (await reg.getNotifications({ tag: 'call' })).forEach((n) => n.close()); } catch {}
 }
 if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', (e) => {
-  const d = e.data || {}; if (d.type !== 'notification' || !calls) return;
+  const d = e.data || {};
+  if (d.type === 'pushchange') { if (settings.get().push) setPush(true, true); return; }
+  if (d.type !== 'notification' || !calls) return;
+  if (d.data && d.data.kind === 'message' && d.data.chatId && app) { openChat(d.data.chatId); return; }
   if (d.action === 'accept' && calls.state === 'incoming') { tones.ensure(); calls.accept(); }
   else if (d.action === 'decline' && calls.state === 'incoming') calls.decline();
 });
@@ -1988,6 +2158,7 @@ function wireCalls() {
   calls.addEventListener('local', (e) => { const v = $('local-video'); v.srcObject = e.detail; v.play().catch(() => {}); });
   calls.addEventListener('remote', (e) => { const v = $('remote-video'); v.srcObject = e.detail; v.play().catch(() => {}); });
   calls.addEventListener('ringing', () => { if (settings.get().sounds) tones.startRing(false); });
+  calls.addEventListener('outgoing', (e) => nudge([e.detail.peer], 'call'));
   calls.addEventListener('error', (e) => toast(e.detail, 'error'));
   calls.addEventListener('ended', (e) => {
     const r = e.detail;
@@ -2059,7 +2230,9 @@ function renderCall(info) {
 
 /* ---------------- boot ---------------- */
 applyTheme();
+const RECOVER_KEY = 'closechat:pendingRecover';
 let pendingRecover = null;
+try { const pr = sessionStorage.getItem(RECOVER_KEY); if (pr) { sessionStorage.removeItem(RECOVER_KEY); pendingRecover = JSON.parse(pr); } } catch {}
 function applyPendingRecover() {
   if (!pendingRecover || $('auth').classList.contains('hidden')) return;
   const { key, u } = pendingRecover; pendingRecover = null;
@@ -2071,8 +2244,17 @@ function parseHash() {
   if (/#recover=/.test(location.hash)) {
     const r = parseRecoveryInput(location.hash);
     history.replaceState(null, '', location.pathname + location.search);
-    if (app) { toast('Log out first to use a recovery link'); return; }
-    pendingRecover = r; applyPendingRecover(); return;
+    if (!r || !r.key) { toast('That recovery link is not valid', 'error'); return; }
+    pendingRecover = r;
+    if (app) {
+      confirmSheet('Reset password with this link?', `You are signed in as ${app.state.profile.username || 'this account'}. Log out and continue to the password reset?`, 'Log out & continue', false).then((ok) => {
+        if (!ok) { pendingRecover = null; return; }
+        sessionStorage.setItem(RECOVER_KEY, JSON.stringify(r));
+        logout();
+      });
+      return;
+    }
+    applyPendingRecover(); return;
   }
   const m = location.hash.match(/#add=([^&]+)(?:&n=([^&]+))?/);
   if (!m) return;
@@ -2088,7 +2270,8 @@ window.addEventListener('beforeunload', () => { if (store) store.flush(); });
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 (async () => {
   const saved = session.get();
-  if (saved) {
+  // A recovery link opened on a still-signed-in device goes straight to the reset form.
+  if (saved && !pendingRecover) {
     try { await startApp(hexToBytes(saved), null); return; } catch (e) { console.error(e); session.clear(); }
   }
   $('auth').classList.remove('hidden');

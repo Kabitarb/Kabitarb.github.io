@@ -97,6 +97,7 @@ export class CallManager extends EventTarget {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       await this.signal({ a: 'offer', sdp: offer.sdp, video: this.video, name: this.app.state.profile.name });
+      this.emit('outgoing', { peer: this.peer, video: this.video });
       this.emit('ringing');
       this.ringTimer = setTimeout(() => { if (this.state === 'outgoing') this.end('no-answer'); }, RING_TIMEOUT);
     } catch (e) {

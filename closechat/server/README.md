@@ -60,3 +60,21 @@ With no SMTP configured, codes are written to `DATA_DIR/outbox.json` (developmen
 
 "signed" = `{ data: "<json>", auth: <nostr event kind 27235 signed by the account key> }`
 (the event's `payload` tag is the SHA-256 of `data`). Rate limit: 40 requests / 10 min / IP, 5 code attempts.
+
+## Web Push (notifications when the app is closed)
+
+The same server can wake a user's *closed* Chatly so it shows "New message" /
+"Incoming call". Nothing but the sender's public key and the kind of event ever
+reaches the server; the real message still travels encrypted over the relays.
+
+1. Deploy the server as above and set the **Recovery server URL** in the app
+   (Settings → Network). The server prints VAPID keys on first start; put them in
+   `.env` as `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` (and `VAPID_SUBJECT=mailto:you@example.com`)
+   so subscriptions survive redeploys.
+2. Each user turns on **Settings → Notifications → When the app is closed**.
+3. Where it works: Chrome/Edge/Firefox on desktop and Android (tab may be closed,
+   browser may run in the background); iPhone/iPad **only** when Chatly is added to
+   the Home Screen from Safari (Share → *Add to Home Screen*, iOS 16.4+) and opened
+   from there. The sideloaded `.ipa` shell cannot receive Apple push without an
+   Apple developer account — use the Home-Screen app on iPhone for notifications.
+   Push notifications open the app; a call still has to be answered inside Chatly.

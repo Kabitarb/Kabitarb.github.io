@@ -14,6 +14,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import nodemailer from 'nodemailer';
 import { verifyEvent } from 'nostr-tools/pure';
+import webpush from 'web-push';
 
 const env = (k, d = '') => process.env[k] ?? d;
 if (fs.existsSync('.env')) {
@@ -37,6 +38,33 @@ function persist() {
   const tmp = FILE + '.tmp';
   fs.writeFileSync(tmp, JSON.stringify(accounts));
   fs.renameSync(tmp, FILE);
+}
+
+// Web Push: subscriptions per public key, so friends' devices can wake this user's
+// closed app. Payloads only say "message" / "call" + the sender's public key — never content.
+const PUSH_FILE = path.join(DATA_DIR, 'push.json');
+let pushSubs = {};
+try { pushSubs = JSON.parse(fs.readFileSync(PUSH_FILE, 'utf8')); } catch {}
+function persistPush() { const tmp = PUSH_FILE + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(pushSubs)); fs.renameSync(tmp, PUSH_FILE); }
+let vapid = { publicKey: env('VAPID_PUBLIC_KEY'), privateKey: env('VAPID_PRIVATE_KEY') };
+if (!vapid.publicKey || !vapid.privateKey) {
+  const vf = path.join(DATA_DIR, 'vapid.json');
+  try { vapid = JSON.parse(fs.readFileSync(vf, 'utf8')); } catch { vapid = webpush.generateVAPIDKeys(); fs.writeFileSync(vf, JSON.stringify(vapid)); }
+  console.warn('VAPID keys not in env — using', vf, '(set VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY so subscriptions survive redeploys)');
+}
+webpush.setVapidDetails(env('VAPID_SUBJECT', 'mailto:admin@example.com'), vapid.publicKey, vapid.privateKey);
+const validPk = (x) => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x);
+const validSub = (x) => x && typeof x.endpoint === 'string' && /^https:\/\//.test(x.endpoint) && x.endpoint.length < 1000 && x.keys && typeof x.keys.p256dh === 'string' && typeof x.keys.auth === 'string';
+const nudges = new Map();    // sender pk -> [timestamps]
+async function pushTo(pk, payload) {
+  const list = pushSubs[pk]; if (!list || !list.length) return 0;
+  let sent = 0; const keep = [];
+  for (const sub of list) {
+    try { await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: payload.kind === 'call' ? 60 : 3600, urgency: 'high' }); sent++; keep.push(sub); }
+    catch (e) { if (e.statusCode !== 404 && e.statusCode !== 410) keep.push(sub); }
+  }
+  if (keep.length !== list.length) { if (keep.length) pushSubs[pk] = keep; else delete pushSubs[pk]; persistPush(); }
+  return sent;
 }
 
 const pending = new Map();   // acct -> { kind: 'email'|'recover', email, code, exp, tries, pk }
@@ -134,6 +162,32 @@ const routes = {
     if (rec && rec.pk === pk) { delete accounts[data.acct]; persist(); }
     return { ok: true };
   },
+  // --- web push (logged in, signed) ---
+  '/v1/push/subscribe': async (body) => {
+    const { pk, data } = authed(body, '/v1/push/subscribe');
+    if (!validSub(data.sub)) throw httpErr(400, 'bad subscription');
+    const sub = { endpoint: data.sub.endpoint, keys: { p256dh: String(data.sub.keys.p256dh), auth: String(data.sub.keys.auth) } };
+    const list = (pushSubs[pk] || []).filter((s) => s.endpoint !== sub.endpoint);
+    list.unshift(sub); pushSubs[pk] = list.slice(0, 8); persistPush();
+    return { ok: true };
+  },
+  '/v1/push/unsubscribe': async (body) => {
+    const { pk, data } = authed(body, '/v1/push/unsubscribe');
+    const list = (pushSubs[pk] || []).filter((s) => s.endpoint !== data.endpoint);
+    if (list.length) pushSubs[pk] = list; else delete pushSubs[pk];
+    persistPush(); return { ok: true };
+  },
+  // "wake up these friends": the real message/call travels encrypted over the relays;
+  // this only makes their closed app show "New message" / "Incoming call".
+  '/v1/push/nudge': async (body) => {
+    const { pk, data } = authed(body, '/v1/push/nudge');
+    const kind = data.kind === 'call' ? 'call' : 'message';
+    const to = Array.isArray(data.to) ? data.to.filter(validPk).slice(0, 50) : [];
+    const now = Date.now(); const arr = (nudges.get(pk) || []).filter((t) => now - t < 60000); arr.push(now); nudges.set(pk, arr);
+    if (arr.length > 120) throw httpErr(429, 'slow down');
+    for (const t of to) if (t !== pk) pushTo(t, { kind, from: pk, at: now }).catch(() => {});
+    return { ok: true };
+  },
   // --- forgot password (logged out, unsigned) ---
   '/v1/recover/start': async (body) => {
     const { acct, email } = body;
@@ -164,7 +218,7 @@ http.createServer(async (req, res) => {
   const headers = { 'Access-Control-Allow-Origin': ALLOW_ORIGIN, 'Access-Control-Allow-Headers': 'content-type', 'Access-Control-Allow-Methods': 'POST, GET, OPTIONS', 'Content-Type': 'application/json' };
   if (req.method === 'OPTIONS') { res.writeHead(204, headers); return res.end(); }
   const url = new URL(req.url, 'http://x');
-  if (req.method === 'GET' && url.pathname === '/') { res.writeHead(200, headers); return res.end(JSON.stringify({ service: APP_NAME + ' recovery', ok: true, mail: !!mailer || DEV_OUTBOX })); }
+  if (req.method === 'GET' && url.pathname === '/') { res.writeHead(200, headers); return res.end(JSON.stringify({ service: APP_NAME + ' recovery', ok: true, mail: !!mailer || DEV_OUTBOX, push: vapid.publicKey })); }
   const handler = routes[url.pathname];
   if (!handler || req.method !== 'POST') { res.writeHead(404, headers); return res.end('{"error":"not found"}'); }
   const ip = req.headers['x-forwarded-for']?.split(',')[0].trim() || req.socket.remoteAddress;
