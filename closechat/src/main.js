@@ -2092,7 +2092,7 @@ function pushHint() {
 }
 async function pushReg() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
-  try { return (await navigator.serviceWorker.getRegistration()) || (await navigator.serviceWorker.ready); } catch { return null; }
+  try { return (await navigator.serviceWorker.getRegistration()) || null; } catch { return null; }
 }
 function b64ToU8(b64) { const s = atob(b64.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(b64.length / 4) * 4, '=')); return Uint8Array.from(s, (c) => c.charCodeAt(0)); }
 async function setPush(on, quiet = false) {
