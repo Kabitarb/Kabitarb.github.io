@@ -9,6 +9,7 @@ const MAX_GROUP = 16;
 const CHUNK = 30000;            // chars of base64 per relay event (fits the ~48 KB payload limit)
 const MAX_VIDEO = 1600000;      // data-URL chars, ~1.2 MB of video
 const PRESENCE_EVERY = 50000;
+const BG_PRESENCE_MS = 10 * 60 * 1000;   // keep showing as online this long after the app is minimized
 // Short fingerprint of a name + photo so friends can tell when theirs is stale.
 export function profileFp(name, avatar) {
   const str = (name || '') + '|' + (avatar || '');
@@ -590,6 +591,7 @@ export class App extends EventTarget {
       else await this.publishRumor(chatId, rumor, false, true);
       if (video) await this.sendChunks(chatId, rumor.id, parts);
       if (m.status === 'pending') m.status = 'sent';
+      this.emit('sent', { chatId, to: group ? this.members(chatId).filter((p) => p !== this.pk) : [chatId] });
     } catch (e) {
       m.status = 'failed'; m.error = e.message;
     }
@@ -794,7 +796,10 @@ export class App extends EventTarget {
   /* ---------- presence ---------- */
   startPresence() {
     clearInterval(this.presenceTimer);
-    this.presenceTimer = setInterval(() => { if (this.visible) this.sendPresence(null, false); }, PRESENCE_EVERY);
+    this.presenceTimer = setInterval(() => {
+      if (this.visible || (this.hiddenSince && Date.now() - this.hiddenSince < BG_PRESENCE_MS)) this.sendPresence(null, false);
+      else if (this.hiddenSince && !this.bgOff) { this.bgOff = true; this.sendPresence(null, false, true); }
+    }, PRESENCE_EVERY);
     this.sendPresence(null, true);
   }
   // Ephemeral "I'm here" heartbeat to every friend; `query` asks them to answer
@@ -810,8 +815,10 @@ export class App extends EventTarget {
   setVisible(v) {
     const was = this.visible; this.visible = v;
     if (!this.ready) return;
-    if (v && !was) this.sendPresence(null, true);
-    else if (!v && was) this.sendPresence(null, false, true);
+    // Like Messenger's "Active now": minimizing does not flip us offline at once;
+    // heartbeats continue for a while (where the browser keeps timers running).
+    if (v && !was) { this.hiddenSince = 0; this.bgOff = false; this.sendPresence(null, true); }
+    else if (!v && was) { this.hiddenSince = Date.now(); this.bgOff = false; }
   }
   setSharePresence(on) { this.sharePresence = !!on; if (!on) this.sendPresence(null, false, true); else this.sendPresence(null, true); }
 

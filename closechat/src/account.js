@@ -87,6 +87,14 @@ export class RecoveryClient {
   refreshEscrow(sk, username) { return this.post('/v1/email/escrow', { acct: accountTag(username), escrow: makeEscrow(sk) }, sk); }
   removeEmail(sk, username) { return this.post('/v1/email/remove', { acct: accountTag(username) }, sk); }
   recoverStart(username, email) { return this.post('/v1/recover/start', { acct: accountTag(username), email }); }
+  // Web Push (optional): the server only ever learns public keys and "message"/"call" wake-ups.
+  async info() {
+    if (!this.enabled) return null;
+    try { const r = await fetch(this.base + '/', { cache: 'no-store' }); return r.ok ? await r.json() : null; } catch { return null; }
+  }
+  pushSubscribe(sk, sub) { return this.post('/v1/push/subscribe', { sub }, sk); }
+  pushUnsubscribe(sk, endpoint) { return this.post('/v1/push/unsubscribe', { endpoint }, sk); }
+  pushNudge(sk, to, kind) { return this.post('/v1/push/nudge', { to, kind }, sk); }
   async recoverFinish(username, email, code) {
     const j = await this.post('/v1/recover/finish', { acct: accountTag(username), email, code });
     return openEscrow(j.escrow);

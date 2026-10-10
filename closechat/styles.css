@@ -675,7 +675,7 @@ html { -webkit-font-smoothing: antialiased; }
 .composer .icon-btn.plus.open { transform: rotate(45deg); background: var(--accent); color: #fff; }
 .composer .send { background: var(--accent); color: #fff; border-radius: 50%; width: 38px; height: 38px; transition: transform .35s var(--bounce), opacity .2s; }
 .composer .send:active { transform: scale(.88); }
-.plus-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px 4px; padding: 8px 2px 4px; }
+.plus-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px 4px; padding: 8px 2px 4px; }
 .plus-grid button { background: none; border: 0; color: var(--fg); font: inherit; font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 4px; cursor: pointer; transition: transform .25s var(--bounce); }
 .plus-grid button:active { transform: scale(.92); }
 .plus-grid .ic { width: 56px; height: 56px; border-radius: 18px; display: grid; place-items: center; font-size: 26px; color: #fff; background: var(--accent); box-shadow: 0 6px 16px -8px rgba(0,0,0,.5); }
@@ -870,3 +870,29 @@ html { -webkit-font-smoothing: antialiased; }
   [class^="sk-"], [class*=" sk-"], .ludo .target, .ludo .safe-star, .dice .cube, .dice.can .cube, #share .share-art span, .eq i { animation: none !important; }
   .ludo .tok { transition: none; }
 }
+
+/* ---- Live TV ---- */
+.plus-grid .ic.tv { background: linear-gradient(135deg, #0ea5e9, #6366f1); }
+.media-card .thumb.tv, .media-card .thumb.hls { background: linear-gradient(135deg, #0ea5e9, #6366f1); }
+.live-pill { font-size: 10px; font-weight: 800; letter-spacing: .06em; background: #ef4444; color: #fff; border-radius: 6px; padding: 2px 6px; vertical-align: middle; }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; flex: none; animation: livepulse 1.6s ease-out infinite; }
+@keyframes livepulse { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,.55); } 70% { box-shadow: 0 0 0 8px rgba(239,68,68,0); } 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); } }
+.tv-cats { display: flex; gap: 6px; overflow-x: auto; padding: 6px 0 2px; scrollbar-width: none; }
+.tv-cats::-webkit-scrollbar { display: none; }
+.tv-cats button { flex: 0 0 auto; border: 1px solid var(--line); background: transparent; color: var(--fg); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: 13px; transition: transform .2s var(--ios, ease), background .2s; }
+.tv-cats button:active { transform: scale(.94); }
+.tv-cats button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.tv-list { max-height: 46dvh; overflow-y: auto; margin: 4px -6px 0; -webkit-overflow-scrolling: touch; }
+.tv-sec { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity: .6; padding: 10px 8px 4px; }
+.tv-ch { display: flex; align-items: center; gap: 12px; width: 100%; background: none; border: 0; color: var(--fg); font: inherit; text-align: left; padding: 8px; border-radius: 14px; transition: transform .18s var(--ios, ease), background .18s; }
+.tv-ch:active { background: rgba(127,127,127,.14); transform: scale(.985); }
+.tv-logo { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font-weight: 800; font-size: 14px; color: #fff; background: hsl(var(--h) 65% 46%); flex: none; letter-spacing: .02em; }
+.tv-logo.mine { background: var(--accent); }
+.tv-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tv-meta b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-meta small { opacity: .65; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv-del { padding: 6px 9px; opacity: .55; border-radius: 8px; font-size: 13px; }
+.tv-del:active { color: #ef4444; opacity: 1; }
+.watch-frame.wide { aspect-ratio: 16/9; max-height: 50dvh; }
+.watch-frame video { position: absolute; inset: 0; width: 100%; height: 100%; background: #000; }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }

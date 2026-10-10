@@ -3,11 +3,17 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Tiny email-recovery server for Chatly (recovery email + encrypted key escrow). Never sees passwords or messages.",
-  "scripts": { "start": "node index.js" },
-  "engines": { "node": ">=18" },
+  "description": "Tiny recovery + web-push server for Chatly (recovery email, encrypted key escrow, push wake-ups). Never sees passwords or messages.",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "nodemailer": "^6.9.16",
-    "nostr-tools": "^2.25.2"
+    "nostr-tools": "^2.25.2",
+    "web-push": "^3.6.7",
+    "web-push": "^3.6.7"
   }
 }
