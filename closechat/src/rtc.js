@@ -114,8 +114,9 @@ export class CallManager extends EventTarget {
   async onSignal(from, msg) {
     if (msg.a === 'offer') {
       if (this.state !== 'idle') {
-        if (!(this.peer === from && this.callId === msg.id)) this.app.sendControl(from, { t: 'call', id: msg.id, a: 'busy' }, true);
-        return;
+        if (this.peer === from && this.callId === msg.id) return;           // re-sent offer of the current call
+        if (this.peer === from && this.state !== 'outgoing') this.end('ended', false); // same peer calls again: their previous call is over
+        else { this.app.sendControl(from, { t: 'call', id: msg.id, a: 'busy' }, true); return; }
       }
       this.peer = from; this.callId = msg.id; this.video = !!msg.video; this.dir = 'in';
       this.pendingOffer = msg.sdp;
