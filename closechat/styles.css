@@ -55,8 +55,8 @@ svg { width: 22px; height: 22px; fill: currentColor; }
 .btn.danger { background: var(--danger); color: #fff; }
 .btn.small { padding: 8px 14px; font-size: 14px; }
 .link { color: var(--accent); text-decoration: none; margin-top: 6px; }
-.check { display: flex; gap: 10px; text-align: left; font-size: 13px; color: var(--fg2); align-items: flex-start; }
-.check input { margin-top: 3px; }
+.check { display: block; text-align: left; font-size: 13px; line-height: 1.45; color: var(--fg2); }
+.check input { float: left; margin: 3px 10px 0 0; }
 .auth-error { color: var(--danger); font-size: 14px; min-height: 18px; }
 .progress { height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden; }
 .progress div { height: 100%; width: 0; background: var(--accent); transition: width .2s; }
