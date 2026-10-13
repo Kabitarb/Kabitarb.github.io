@@ -8,7 +8,7 @@ import { Store, settings, session } from './store.js';
 import { App, isGroupId, gidOf, profileFp, EXPIRE_OPTIONS } from './app.js';
 import { CallManager, Tones } from './rtc.js';
 import { PACKS, stickerIds, stickerSvg, animIds, animOf, animHtml } from './stickers.js';
-import { GameManager, GAMES, renderTTT, renderLudo, ludoXY } from './games.js';
+import { GameManager, GAMES, VIEWS, GAME_ORDER } from './games.js';
 import { ShareManager } from './share.js';
 import { WatchManager, parseMedia, MEDIA_RE } from './watch.js';
 import { TV_CHANNELS, TV_CATS, tvUrl, tvHue } from './tv.js';
@@ -427,7 +427,7 @@ async function startApp(sk, newName, username) {
     c.title = `${n}/${total} relays connected`;
   });
   app = new App(sk, store, transport);
-  window.__chatly = app; // diagnostics / tests
+  window.__chatly = app; window.__games = () => games; // diagnostics / tests
   applyKeepAlive();
   checkShellUpdate();
   accountSk = sk;
@@ -2030,14 +2030,14 @@ const url = await promptSheet('Watch together', '', 'Paste an Instagram reel / Y
 async function openGames(id) {
   if (!id) return;
   const active = games.forChat(id);
-  const items = [
-    ...active.map((s) => ({ id: 'g:' + s.id, label: `${GAMES[s.type].icon} ${s.status === 'lobby' ? 'Join' : 'Open'} ${GAMES[s.type].name} (${s.players.length} player${s.players.length === 1 ? '' : 's'})` })),
-    { id: 'ttt', label: '⭕ New Tic-Tac-Toe' }, { id: 'ludo', label: '🎲 New Ludo' },
-  ];
-  const act = await menuSheet(items);
-  if (!act) return;
-  if (act.startsWith('g:')) openGame(act.slice(2));
-  else { try { const s = games.invite(id, act); openGame(s.id); } catch (e) { toast(e.message, 'error'); } }
+  showModal(`<h3>Games</h3><div class="menu gpick">
+    ${active.map((s) => `<button class="gactive" data-mi="g:${s.id}"><span class="gicon">${GAMES[s.type].icon}</span><b>${s.status === 'lobby' ? 'Join' : 'Open'} ${esc(GAMES[s.type].name)}</b><small>${s.players.length} player${s.players.length === 1 ? '' : 's'} · ${s.status === 'lobby' ? 'in lobby' : 'playing'}</small></button>`).join('')}
+    ${GAME_ORDER.map((t) => `<button class="gtile" data-mi="${t}" style="--gc:${GAMES[t].color}"><span class="gicon">${GAMES[t].icon}</span><b>${esc(GAMES[t].name)}</b><small>${esc(GAMES[t].blurb)}</small></button>`).join('')}</div>`);
+  $('modal-body').querySelectorAll('[data-mi]').forEach((b) => { b.onclick = () => {
+    const act = b.dataset.mi; hideModal(); haptic();
+    if (act.startsWith('g:')) openGame(act.slice(2));
+    else { try { const s = games.invite(id, act); openGame(s.id); } catch (e) { toast(e.message, 'error'); } }
+  }; });
 }
 
 /* ---------------- groups ---------------- */
@@ -2305,7 +2305,7 @@ function openGame(id) {
   $('game').classList.remove('hidden');
   renderGame();
 }
-function closeGamePanel() { openGameId = null; gameMini = false; $('game').classList.add('hidden'); $('game').classList.remove('full', 'mini', 'turn'); }
+function closeGamePanel() { dropGameView(); openGameId = null; gameMini = false; $('game').classList.add('hidden'); $('game').classList.remove('full', 'mini', 'turn'); }
 function setGameMini(on) { gameMini = on; renderGame(); haptic(); }
 $('game-hide').onclick = () => setGameMini(true);
 $('game-mini-bar').onclick = (e) => { if (!e.target.closest('#game-mini-leave')) setGameMini(false); };
@@ -2315,7 +2315,11 @@ async function leaveGame() {
 }
 $('game-quit').onclick = leaveGame;
 $('game-mini-leave').onclick = (e) => { e.stopPropagation(); leaveGame(); };
-let autoMoveTimer = null, lastDone = null;
+let lastDone = null, gameView = null, gameViewFor = null;
+function dropGameView() { if (gameView) { try { gameView.unmount(); } catch {} } gameView = null; gameViewFor = null; }
+function gameCtx(s) {
+  return { my: games.myIndex(s), pk: app.pk, nameOf: (p) => (p === app.pk ? 'You' : app.nameOf(p)), avatar: avatarHtml, move: (mv) => games.move(s.id, mv), haptic, fx, confetti, toast, reduced: reducedMotion() };
+}
 function renderGame() {
   const s = games.get(openGameId); if (!s) { closeGamePanel(); return; }
   const G = GAMES[s.type];
@@ -2324,18 +2328,22 @@ function renderGame() {
   $('game-quit').textContent = s.status === 'done' ? 'Close' : 'Leave';
   const body = $('game-body');
   const my = games.myIndex(s);
-  const myTurn = s.status === 'playing' && s.state && s.players[s.state.turn] === app.pk;
+  const myTurn = games.isMyTurn(s);
+  const over = games.isOver(s);
   panel.classList.toggle('mini', gameMini);
   panel.classList.toggle('full', !gameMini && s.status !== 'lobby');
   panel.classList.toggle('turn', gameMini && myTurn);
+  panel.dataset.game = s.type;
   $('game-mini-icon').textContent = G.icon;
   $('game-mini-title').textContent = `${G.name} · ${app.nameOf(s.chatId)}`;
-  $('game-mini-sub').textContent = s.status === 'lobby' ? 'Waiting in lobby · tap to return' : s.status === 'done' ? 'Game over · tap to return' : myTurn ? 'Your turn! Tap to play' : `${esc(app.nameOf(s.players[s.state.turn]))}'s turn · tap to return`;
+  $('game-mini-sub').textContent = s.status === 'lobby' ? 'Waiting in lobby · tap to return' : s.status === 'done' || over ? 'Game over · tap to return' : myTurn ? 'Your turn! Tap to play' : `${s.state && s.players[s.state.turn] ? esc(app.nameOf(s.players[s.state.turn])) + "'s turn" : 'Waiting'} · tap to watch`;
   $('game-mini-leave').textContent = s.status === 'done' ? 'Close' : 'Leave';
   if (gameMini) return;
+  if (s.status !== 'playing') dropGameView();
   if (s.status === 'lobby') {
     const host = s.host === app.pk;
-    body.innerHTML = `<div class="lobby"><div class="game-status">${host ? (s.players.length < G.min ? 'Waiting for friends to join…' : 'Ready when you are') : `Waiting for ${esc(app.nameOf(s.host))} to start…`}</div>
+    body.innerHTML = `<div class="lobby"><div class="lobby-hero" style="--gc:${G.color}"><span>${G.icon}</span></div><h3>${esc(G.name)}</h3><p class="muted">${esc(G.blurb)}</p>
+      <div class="game-status">${host ? (s.players.length < G.min ? 'Waiting for friends to join…' : 'Ready when you are') : `Waiting for ${esc(app.nameOf(s.host))} to start…`}</div>
       <div class="players">${s.players.map((p) => `<div>${avatarHtml(p, 'sm')}<span>${esc(p === app.pk ? 'You' : app.nameOf(p))}${p === s.host ? ' <span class="tiny muted">host</span>' : ''}</span></div>`).join('')}</div>
       <p class="tiny muted">${G.min === G.max ? `${G.max} players` : `${G.min}–${G.max} players`} · ${s.players.length} joined</p>
       ${host ? `<button class="btn primary" id="game-start" ${s.players.length < G.min ? 'disabled' : ''}>Start game</button>` : ''}</div>`;
@@ -2344,71 +2352,33 @@ function renderGame() {
   }
   if (s.status === 'done') {
     const w = s.state && s.state.winner;
-    body.innerHTML = `<div class="game-panel-done">${s.quitBy ? `${esc(s.quitBy === app.pk ? 'You' : app.nameOf(s.quitBy))} left the game` : w !== null && w !== undefined ? `🏆 ${esc(w === my ? 'You won!' : app.nameOf(s.players[w]) + ' won')}` : 'Game over'}</div>
+    body.innerHTML = `<div class="game-panel-done">${s.quitBy ? `${esc(s.quitBy === app.pk ? 'You' : app.nameOf(s.quitBy))} left the game` : w !== null && w !== undefined && w >= 0 ? `🏆 ${esc(w === my ? 'You won!' : app.nameOf(s.players[w]) + ' won')}` : 'Game over'}
+      ${s.state && s.state.score ? `<div class="g-series">${s.players.map((p, i) => `${esc(p === app.pk ? 'You' : app.nameOf(p))} ${s.state.score[i] || 0}`).join(' · ')}</div>` : ''}
       <button class="btn primary" id="game-again">Play again</button>`;
     $('game-again').onclick = () => { try { const n = games.invite(s.chatId, s.type); openGame(n.id); } catch (e) { toast(e.message, 'error'); } };
-    if (w !== null && w !== undefined && w === my && !s.quitBy && lastDone !== s.id) { lastDone = s.id; confetti(body, 48); fx(900, 0.2, 0, 0.06, 'sine'); fx(1200, 0.2, 0.15, 0.06, 'sine'); fx(1600, 0.35, 0.3, 0.06, 'sine'); }
     return;
   }
-  const nameOf = (p) => (p === app.pk ? 'You' : app.nameOf(p));
-  body.innerHTML = s.type === 'ttt' ? renderTTT(s, my, nameOf) : renderLudo(s, my, nameOf);
-  if (s.type === 'ludo') animateLudo(s, body);
-  body.querySelectorAll('.ttt-cell.can').forEach((b) => { b.onclick = () => { haptic(); games.move(s.id, { i: Number(b.dataset.i) }); }; });
-  body.querySelectorAll('[data-game-act=again]').forEach((b) => { b.onclick = () => games.move(s.id, { a: 'again' }); });
-  body.querySelectorAll('[data-game-act=roll]').forEach((b) => { b.onclick = () => { haptic(15); b.disabled = true; games.move(s.id, { a: 'roll', d: 1 + Math.floor(Math.random() * 6) }); }; });
-  body.querySelectorAll('.tok.can').forEach((t) => { t.onclick = () => { haptic(); games.move(s.id, { a: 'move', i: Number(t.dataset.tok) }); }; });
-  clearTimeout(autoMoveTimer);
-  if (s.type === 'ludo' && my >= 0) {
-    const legal = games.legal(s.id);
-    if (legal.length === 1 && s.state.phase === 'move' && s.state.turn === my) autoMoveTimer = setTimeout(() => games.move(s.id, { a: 'move', i: legal[0] }), 1150);
+  const key = s.id + ':' + s.players.length;
+  if (!gameView || gameViewFor !== key) {
+    dropGameView();
+    body.innerHTML = ''; const host = document.createElement('div'); host.className = 'g-view g-' + s.type; body.appendChild(host);
+    gameView = VIEWS[s.type](gameCtx(s)); gameViewFor = key; gameView.mount(host);
   }
-}
-const ludoSeen = {};
-function animateLudo(s, body) {
-  const st = s.state, last = st.last, seq = st.seq || 0;
-  const prev = ludoSeen[s.id]; ludoSeen[s.id] = seq;
-  const svg = body.querySelector('.ludo'); if (!svg) return;
-  const myTurn = s.players[st.turn] === app.pk;
-  if (myTurn && st.phase === 'move' && prev !== undefined && seq !== prev) svg.classList.add('waiting');
-  if (prev === undefined || seq === prev || !last || reducedMotion()) { svg.classList.remove('waiting'); return; }
-  if (last.a === 'roll') {
-    const dice = body.querySelector('.dice'); if (!dice) return;
-    svg.classList.add('waiting'); dice.classList.add('rolling');
-    for (let k = 0; k < 6; k++) fx(500 + Math.random() * 500, 0.04, k * 0.11, 0.05, 'square');
-    setTimeout(() => { dice.classList.remove('rolling'); dice.dataset.d = last.d; svg.classList.remove('waiting'); haptic(10); fx(last.d === 6 ? 1400 : 900, 0.12, 0, 0.06, 'sine'); }, 760);
-    return;
-  }
-  if (last.a !== 'move') return;
-  const tok = svg.querySelector(`[data-key="${last.pi}-${last.i}"]`);
-  let dur = 0;
-  if (tok) {
-    const pts = [];
-    if (last.from === -1) pts.push(ludoXY(st, last.pi, last.i, -1), ludoXY(st, last.pi, last.i, 0));
-    else for (let p = last.from; p <= last.to; p++) pts.push(ludoXY(st, last.pi, last.i, p));
-    pts[pts.length - 1] = [parseFloat(tok.style.getPropertyValue('--tx')), parseFloat(tok.style.getPropertyValue('--ty'))];
-    const n = pts.length - 1; if (n < 1) return;
-    const frames = [];
-    pts.forEach(([x, y], k) => {
-      frames.push({ transform: `translate(${x}px,${y}px) scale(1)`, offset: k / n });
-      if (k < n) { const [nx, ny] = pts[k + 1]; frames.push({ transform: `translate(${(x + nx) / 2}px,${(y + ny) / 2 - 6}px) scale(1.35)`, offset: (k + 0.5) / n }); }
-    });
-    dur = Math.max(480, Math.min(1500, 170 * n + 150));
-    svg.classList.add('waiting'); tok.classList.add('moving'); tok.parentNode.appendChild(tok);
-    const a = tok.animate(frames, { duration: dur, easing: 'linear', fill: 'both' });
-    for (let k = 1; k <= n; k++) fx(700 + k * 40, 0.03, (dur / n) * k / 1000, 0.04);
-    a.onfinish = () => { a.cancel(); tok.classList.remove('moving'); svg.classList.remove('waiting'); haptic(8); if (last.finished) { fx(1000, 0.15, 0, 0.06, 'sine'); fx(1500, 0.25, 0.12, 0.06, 'sine'); confetti(body, 24); } };
-  }
-  for (const c of last.caps || []) {
-    const ct = svg.querySelector(`[data-key="${c.pi}-${c.i}"]`); if (!ct) continue;
-    const [sx, sy] = ludoXY(st, c.pi, c.i, c.from); const fxp = parseFloat(ct.style.getPropertyValue('--tx')), fyp = parseFloat(ct.style.getPropertyValue('--ty'));
-    ct.parentNode.appendChild(ct);
-    const a = ct.animate([
-      { transform: `translate(${sx}px,${sy}px) scale(1)` }, { transform: `translate(${sx}px,${sy}px) scale(1.5) rotate(20deg)`, offset: 0.3 },
-      { transform: `translate(${fxp}px,${fyp}px) scale(0.5)`, offset: 0.85 }, { transform: `translate(${fxp}px,${fyp}px) scale(1)` },
-    ], { duration: 900, delay: Math.max(0, dur - 120), easing: 'cubic-bezier(.32,.72,0,1)', fill: 'both' });
-    a.onfinish = () => a.cancel();
-    setTimeout(() => { body.classList.remove('game-flash'); void body.offsetWidth; body.classList.add('game-flash'); haptic(30); fx(300, 0.25, 0, 0.08, 'sawtooth'); if (c.pi === games.myIndex(s)) toast('Your token was captured!'); else if (last.pi === games.myIndex(s)) toast('Captured! 🎯'); }, Math.max(0, dur - 120));
-  }
+  try { gameView.update(s); } catch (e) { console.error(e); body.innerHTML = `<div class="game-status">Could not draw the game (${esc(e.message)})</div>`; }
+  let ov = body.querySelector('.g-result');
+  if (over) {
+    const st = s.state, w = st.winner, won = w === my, draw = w === null || w === undefined || w < 0;
+    if (!ov) { ov = document.createElement('div'); ov.className = 'g-result'; body.appendChild(ov); }
+    ov.innerHTML = `<div class="g-result-card"><div class="g-trophy">${draw ? '🤝' : won ? '🏆' : '😮'}</div><h3>${draw ? "It's a draw" : won ? 'You win!' : esc(app.nameOf(s.players[w])) + ' wins'}</h3>
+      ${st.score ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(p === app.pk ? 'You' : app.nameOf(p))} <b>${st.score[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : ''}
+      <div class="g-result-actions"><button class="btn ghost" id="g-result-look">Look at board</button><button class="btn primary" data-game-act="again">Rematch</button></div>
+      <button class="link" id="g-result-leave">Leave game</button></div>`;
+    ov.querySelector('[data-game-act=again]').onclick = () => { haptic(); games.move(s.id, { a: 'again' }); };
+    ov.querySelector('#g-result-look').onclick = () => { ov.classList.add('peek'); setTimeout(() => ov && ov.classList.remove('peek'), 4000); };
+    ov.querySelector('#g-result-leave').onclick = leaveGame;
+    const doneKey = s.id + ':' + (st.round || 1);
+    if (lastDone !== doneKey) { lastDone = doneKey; if (won) { confetti(body, 60); fx(900, 0.2, 0, 0.06, 'sine'); fx(1200, 0.2, 0.15, 0.06, 'sine'); fx(1600, 0.35, 0.3, 0.06, 'sine'); haptic([30, 60, 30, 60, 60]); } else if (!draw) { fx(400, 0.3, 0, 0.05, 'triangle'); fx(300, 0.4, 0.2, 0.05, 'triangle'); } }
+  } else if (ov) ov.remove();
 }
 function confetti(host, count = 36) {
   if (reducedMotion()) return;
