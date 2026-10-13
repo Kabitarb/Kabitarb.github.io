@@ -1283,3 +1283,7 @@ button, .icon-btn { -webkit-touch-callout: none; }
 .dots-wrap { width: min(92vw, 56dvh, 520px); max-width: 100%; }
 .dots { height: auto; aspect-ratio: 1 / 1; display: block; }
 #game.mini .game-mini-bar .btn { background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.45); color: #fff; }
+.pool-wrap.rot { max-width: min(92vw, 30dvh); flex: none; }
+#game[data-game="pool"].full .game-body { overflow-y: auto; justify-content: flex-start; }
+#game[data-game="pool"].full .game-body .g-score { flex: none; }
+.pool-wrap + .game-status, .pong-wrap + .game-status { flex: none; padding-bottom: 6px; }
