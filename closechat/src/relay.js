@@ -117,6 +117,13 @@ export class Transport {
   }
 
   // Newest encrypted account backup published by this identity (or null).
+  // Every directory record ever published under a username (including the empty
+  // "hidden from search" ones) — the username is claimed by each of those pubkeys.
+  async claims(username) {
+    const evs = await this.pool.querySync(this.relays, { kinds: [DIRECTORY_KIND], '#d': [directoryTag(username)] }, { maxWait: 6000 });
+    return [...new Set(evs.filter((ev) => verifyEvent(ev)).map((ev) => ev.pubkey))];
+  }
+
   async fetchBackup(pk, tag) {
     const evs = await this.pool.querySync(this.relays, { kinds: [DIRECTORY_KIND], authors: [pk], '#d': [tag] }, { maxWait: 7000 });
     let best = null;

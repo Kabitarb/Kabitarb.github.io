@@ -47,8 +47,8 @@ export async function resolveLogin(username, password, onProgress, onStatus = ()
   let known = false;
   try {
     known = await withTransport(async (t) => {
-      const [dir, bk] = await Promise.all([t.lookup(username).catch(() => []), t.fetchBackup(kekPk, backupTag(kekPk)).catch(() => null)]);
-      return !!bk || dir.some((r) => r.pk === kekPk);
+      const [pks, bk] = await Promise.all([t.claims(username).catch(() => []), t.fetchBackup(kekPk, backupTag(kekPk)).catch(() => null)]);
+      return !!bk || pks.includes(kekPk);
     });
   } catch { throw new Error('Could not reach the relays to check this account. Check your connection and try again.'); }
   if (!known) throw new Error(NO_ACCOUNT);
@@ -60,8 +60,8 @@ export const NO_ACCOUNT = 'No account found with that username and password. Che
 export async function usernameTaken(username) {
   const tag = keystoreTag(username);
   return withTransport(async (t) => {
-    const [ks, dir] = await Promise.all([t.fetchKeystores(tag).catch(() => []), t.lookup(username).catch(() => [])]);
-    return ks.length > 0 || dir.length > 0;
+    const [ks, pks] = await Promise.all([t.fetchKeystores(tag).catch(() => []), t.claims(username).catch(() => [])]);
+    return ks.length > 0 || pks.length > 0;
   });
 }
 
