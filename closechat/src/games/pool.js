@@ -108,12 +108,14 @@ export const engine = {
 };
 
 export function view(ctx) {
-  let el, cv, g, raf = 0, snapshot = null, seen = -1, aim = null, s0 = null, drawn = null, playing = false;
+  let el, cv, g, raf = 0, snapshot = null, seen = -1, aim = null, s0 = null, playing = false, rot = false;
   const copy = (b) => b.map((x) => ({ ...x }));
   function draw(balls, aimInfo) {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const w = cv.clientWidth, h = w / 2; if (cv.width !== w * dpr) { cv.width = w * dpr; cv.height = h * dpr; }
-    g.setTransform(cv.width / W, 0, 0, cv.height / H, 0, 0);
+    rot = window.innerHeight > window.innerWidth * 1.1; cv.parentElement.classList.toggle('rot', rot);
+    const w = cv.clientWidth, h = rot ? w * 2 : w / 2; if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) { cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr); cv.style.height = h + 'px'; }
+    const sc = cv.width / (rot ? H : W);
+    if (rot) g.setTransform(0, sc, -sc, 0, H * sc, 0); else g.setTransform(sc, 0, 0, sc, 0, 0);
     g.clearRect(0, 0, W, H);
     g.fillStyle = '#5b3a1e'; g.beginPath(); g.roundRect(0, 0, W, H, 22); g.fill();
     g.fillStyle = '#1f7a3e'; g.fillRect(PAD - 8, PAD - 8, W - 2 * PAD + 16, H - 2 * PAD + 16);
@@ -132,7 +134,7 @@ export function view(ctx) {
       g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.arc(b.x + 2, b.y + 3, R, 0, 7); g.fill();
       g.fillStyle = typeOf(b.n) === 'stripe' ? '#f5f5f5' : COLORS[b.n]; g.beginPath(); g.arc(b.x, b.y, R, 0, 7); g.fill();
       if (typeOf(b.n) === 'stripe') { g.save(); g.beginPath(); g.arc(b.x, b.y, R, 0, 7); g.clip(); g.fillStyle = COLORS[b.n]; g.fillRect(b.x - R, b.y - R * 0.55, 2 * R, R * 1.1); g.restore(); }
-      if (b.n) { g.fillStyle = '#fff'; g.beginPath(); g.arc(b.x, b.y, R * 0.45, 0, 7); g.fill(); g.fillStyle = '#111'; g.font = 'bold 7px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(b.n, b.x, b.y + 0.5); }
+      if (b.n) { g.fillStyle = '#fff'; g.beginPath(); g.arc(b.x, b.y, R * 0.45, 0, 7); g.fill(); g.fillStyle = '#111'; g.font = 'bold 7px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; if (rot) { g.save(); g.translate(b.x, b.y); g.rotate(-Math.PI / 2); g.fillText(b.n, 0, 0.5); g.restore(); } else g.fillText(b.n, b.x, b.y + 0.5); }
       g.fillStyle = 'rgba(255,255,255,.45)'; g.beginPath(); g.arc(b.x - R * 0.35, b.y - R * 0.4, R * 0.25, 0, 7); g.fill();
     }
   }
@@ -144,7 +146,7 @@ export function view(ctx) {
     if (ctx.reduced || !frames.length) { playing = false; done(); return; }
     tick();
   }
-  function pos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H]; }
+  function pos(e) { const r = cv.getBoundingClientRect(); const sx = e.clientX - r.left, sy = e.clientY - r.top; return rot ? [sy / r.height * W, H - sx / r.width * H] : [sx / r.width * W, sy / r.height * H]; }
   return {
     mount(host) { el = host; },
     update(s) {
@@ -156,7 +158,7 @@ export function view(ctx) {
         el.innerHTML = `${scoreStrip(ctx, s, over)}<div class="pool-info" id="pool-info"></div><div class="pool-wrap"><canvas class="pool" id="pool-cv"></canvas></div><div class="game-status" id="pool-status"></div>`;
         cv = el.querySelector('#pool-cv'); g = cv.getContext('2d');
         cv.onpointerdown = (e) => { if (!s0 || playing || !(s0.players[s0.state.turn] === ctx.pk) || engine.over(s0.state)) return; cv.setPointerCapture(e.pointerId); aim = { start: pos(e), ang: 0, pow: 0 }; e.preventDefault(); };
-        cv.onpointermove = (e) => { if (!aim) return; const [x, y] = pos(e); const cue = s0.state.balls.find((b) => b.n === 0); const dx = x - cue.x, dy = y - cue.y; aim.ang = Math.atan2(dy, dx); aim.pow = Math.min(1, Math.hypot(dx - (aim.start[0] - cue.x) * 0, dy) / 220 + 0.15); aim.pow = Math.min(1, Math.max(0.1, Math.hypot(dx, dy) / 260)); draw(s0.state.balls, aim); };
+        cv.onpointermove = (e) => { if (!aim) return; const [x, y] = pos(e); const cue = s0.state.balls.find((b) => b.n === 0); const dx = x - cue.x, dy = y - cue.y; aim.ang = Math.atan2(dy, dx); aim.pow = Math.min(1, Math.max(0.1, Math.hypot(dx, dy) / 260)); draw(s0.state.balls, aim); };
         cv.onpointerup = () => { if (!aim) return; const shot = { ang: Math.round(aim.ang * 1000) / 1000, pow: Math.round(aim.pow * 100) / 100 }; aim = null; ctx.haptic(20); ctx.fx(900, 0.05, 0, 0.08, 'square'); ctx.move(shot); };
         cv.onpointercancel = () => { aim = null; draw(s0.state.balls); };
       } else { el.querySelector('.g-score').outerHTML = scoreStrip(ctx, s, over); }

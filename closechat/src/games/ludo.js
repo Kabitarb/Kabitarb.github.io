@@ -89,7 +89,6 @@ const LUDO = {
   },
   over(st) { return st.winner !== null; },
 };
-const ENGINES = { ttt: TTT, ludo: LUDO };
 
 export const engine = LUDO;
 

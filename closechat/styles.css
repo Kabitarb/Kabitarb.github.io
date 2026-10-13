@@ -1093,8 +1093,8 @@ html[data-font="small"] .bubble { font-size: 14px; } html[data-font="large"] .bu
 .sb-fleet { display: flex; gap: 6px; font-size: 10px; letter-spacing: -1px; } .sb-fleet span { color: #38bdf8; } .sb-fleet span.down { color: var(--fg2); text-decoration: line-through; opacity: .6; }
 /* pool + cup pong */
 .pool-wrap, .pong-wrap { width: 100%; border-radius: 22px; overflow: hidden; box-shadow: 0 18px 40px rgba(0,0,0,.35); touch-action: none; } .pool-wrap canvas, .pong-wrap canvas { display: block; width: 100%; }
-.pool-wrap { max-width: min(96vw, 160dvh); } .pong-wrap { max-width: min(80vw, 46dvh); margin: 0 auto; }
+.pool-wrap { max-width: min(96vw, 160dvh); } .pool-wrap.rot { max-width: min(92vw, 38dvh); margin: 0 auto; } .pong-wrap { max-width: min(80vw, 46dvh); margin: 0 auto; }
 .pool-wrap.mine, .pong-wrap.mine { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 60%, transparent), 0 18px 40px rgba(0,0,0,.35); }
 .pool-info { display: flex; justify-content: center; gap: 16px; font-size: 13px; color: var(--fg2); } .pool-info .active { color: var(--fg); } .pool-info b { text-transform: capitalize; }
 #game[data-game="pool"].full .game-body { justify-content: center; }
-@media (orientation: portrait) { #game[data-game="pool"].full .pool-wrap { max-width: 100%; } }
+
