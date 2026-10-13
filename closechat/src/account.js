@@ -4,9 +4,9 @@
 // identity key is wrapped in a keystore locked with the new password (relays +
 // local copy); login tries the keystore first and falls back to the direct
 // derivation for accounts that never changed their password.
-import { deriveSecretKey, pubkeyOf, keystoreTag, keystoreEvent, openKeystore, bytesToHex, hexToBytes, accountTag, makeEscrow, openEscrow, signedRequest, normalizeUsername } from './crypto.js';
+import { deriveSecretKey, pubkeyOf, keystoreTag, keystoreEvent, openKeystore, bytesToHex, hexToBytes, accountTag, backupTag, makeEscrow, openEscrow, signedRequest, normalizeUsername } from './crypto.js';
 import { Transport, DEFAULT_RELAYS } from './relay.js';
-import { settings } from './store.js';
+import { settings, hasState } from './store.js';
 
 const KS_PREFIX = 'closechat:ks:';
 export function cachedKeystore(tag) { try { return JSON.parse(localStorage.getItem(KS_PREFIX + tag)); } catch { return null; } }
@@ -39,7 +39,30 @@ export async function resolveLogin(username, password, onProgress, onStatus = ()
   }
   if (local && local.pubkey !== kekPk) throw new Error('This password was changed. Use your current password, or tap “Forgot password?”.');
   if (evs.some((ev) => ev.pubkey === kekPk)) throw new Error('This password was changed. Use your current password, or tap “Forgot password?”.');
+  if (evs.length) throw new Error('Wrong password. Try again or tap “Forgot password?”.');
+  // Direct-derivation account (never changed its password): it must already exist
+  // on this device or on the relays; never silently create one from a typo.
+  if (await hasState(kekPk)) return { sk: kek, kek, mode: 'direct' };
+  onStatus('Looking up account…');
+  let known = false;
+  try {
+    known = await withTransport(async (t) => {
+      const [dir, bk] = await Promise.all([t.lookup(username).catch(() => []), t.fetchBackup(kekPk, backupTag(kekPk)).catch(() => null)]);
+      return !!bk || dir.some((r) => r.pk === kekPk);
+    });
+  } catch { throw new Error('Could not reach the relays to check this account. Check your connection and try again.'); }
+  if (!known) throw new Error(NO_ACCOUNT);
   return { sk: kek, kek, mode: 'direct' };
+}
+export const NO_ACCOUNT = 'No account found with that username and password. Check them or create an account.';
+
+// Sign-up guard: a username already claimed by a keystore or directory record.
+export async function usernameTaken(username) {
+  const tag = keystoreTag(username);
+  return withTransport(async (t) => {
+    const [ks, dir] = await Promise.all([t.fetchKeystores(tag).catch(() => []), t.lookup(username).catch(() => [])]);
+    return ks.length > 0 || dir.length > 0;
+  });
 }
 
 // Lock the (unchanged) identity with a new password: publish + cache keystore.

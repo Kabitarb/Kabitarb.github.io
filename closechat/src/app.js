@@ -67,7 +67,20 @@ export class App extends EventTarget {
     });
     this.store.onChange(() => this.checkBackup());
     // Backgrounded tabs (and iOS web views) silently lose their sockets: poll and heal.
-    this.watchdog = setInterval(() => { if (this.visible && this.ready && this.transport.connected === 0) this.resume(); }, 15000);
+    // Frozen page (iOS/Safari background) → timers stop; a long gap between ticks
+    // means we were asleep and the sockets are suspect. Also probe the relays
+    // every minute while visible, since dead sockets can still report "connected".
+    this.lastTick = Date.now(); this.lastProbe = Date.now();
+    this.watchdog = setInterval(() => {
+      const now = Date.now(); const gap = now - this.lastTick; this.lastTick = now;
+      if (!this.ready) return;
+      if (gap > 20000) { this.resume(true); return; }
+      if (this.visible && this.transport.connected === 0) { this.resume(); return; }
+      if (this.visible && now - this.lastProbe > 60000 && !this.probing) {
+        this.lastProbe = now; this.probing = true;
+        this.transport.probe().then((ok) => { this.probing = false; if (!ok) this.resume(true); }).catch(() => { this.probing = false; });
+      }
+    }, 5000);
   }
 
   stop() { clearInterval(this.presenceTimer); clearInterval(this.sweepTimer); clearTimeout(this.backupTimer); clearInterval(this.watchdog); }
@@ -79,7 +92,8 @@ export class App extends EventTarget {
     if (!force && Date.now() - this.lastResume < 10000) return;
     this.lastResume = Date.now();
     this.emit('resuming');
-    try { await this.transport.reconnect(); } catch {}
+    try { if (force) await this.transport.hardReconnect(); else await this.transport.reconnect(); } catch {}
+    this.lastProbe = Date.now();
     const since = this.state.lastSync ? this.state.lastSync - 3 * 24 * 3600 : Math.floor(Date.now() / 1000) - 90 * 24 * 3600;
     this.transport.listen(this.pk, since, (w) => this.handleWrap(w), () => this.emit('resumed'));
     this.sendPresence(null, true);

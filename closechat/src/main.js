@@ -3,7 +3,7 @@ import jsQR from 'jsqr';
 import { deriveSecretKey, pubkeyOf, bytesToHex, hexToBytes, friendCode, parseFriendCode, localCipher, normalizeUsername } from './crypto.js';
 import { Transport, DEFAULT_RELAYS } from './relay.js';
 import { encodeRecoveryKey, decodeRecoveryKey } from './crypto.js';
-import { resolveLogin, setPassword, checkPassword, republishKeystore, RecoveryClient } from './account.js';
+import { resolveLogin, usernameTaken, setPassword, checkPassword, republishKeystore, RecoveryClient } from './account.js';
 import { Store, settings, session } from './store.js';
 import { App, isGroupId, gidOf, profileFp, EXPIRE_OPTIONS } from './app.js';
 import { CallManager, Tones } from './rtc.js';
@@ -299,8 +299,11 @@ $('signup-form').onsubmit = async (e) => {
   if (normalizeUsername(u).length < 3) { err.textContent = 'Username must be at least 3 characters.'; return; }
   if (p.length < 12) { err.textContent = 'Use at least 12 characters for your password.'; return; }
   if (p !== p2) { err.textContent = 'Passwords do not match.'; return; }
-  const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Creating keys…';
+  const btn = e.target.querySelector('button'); btn.disabled = true; btn.textContent = 'Checking username…';
   try {
+    let taken = false; try { taken = await usernameTaken(u); } catch {}
+    if (taken) throw new Error('That username is already taken. Pick another, or log in if it is yours.');
+    btn.textContent = 'Creating keys…';
     const sk = await derive(u, p, $('signup-progress'));
     await startApp(sk, name, u);
   } catch (ex) { err.textContent = ex.message; }
@@ -400,6 +403,7 @@ async function startApp(sk, newName, username) {
     c.title = `${n}/${total} relays connected`;
   });
   app = new App(sk, store, transport);
+  window.__chatly = app; // diagnostics / tests
   accountSk = sk;
   app.sharePresence = s.presence !== false;
   calls = new CallManager(app);
@@ -500,6 +504,9 @@ function wireApp() {
   });
   window.addEventListener('pageshow', (e) => { if (e.persisted) wake('pageshow'); });
   window.addEventListener('online', () => wake('online'));
+  // Native iOS shell tells us when the app returns to the foreground (timers were frozen).
+  window.addEventListener('chatly:foreground', () => { app.setVisible(true); if (app.openChat) app.markRead(app.openChat); wake('foreground'); });
+  window.addEventListener('chatly:background', () => { if (!hiddenAt) hiddenAt = Date.now(); app.setVisible(false); });
   window.addEventListener('focus', () => { if (!document.hidden && hiddenAt) wake('visible'); });
   app.addEventListener('resuming', () => showSync(true));
   app.addEventListener('resumed', () => showSync(false));
