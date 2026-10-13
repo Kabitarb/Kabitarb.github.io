@@ -1294,3 +1294,4 @@ button, .icon-btn { -webkit-touch-callout: none; }
 #auth .auth-card::before { width: 260px; height: 260px; left: -40px; top: -60px; background: var(--accent); }
 #auth .auth-card::after { width: 220px; height: 220px; right: -30px; bottom: -40px; background: var(--accent-2); }
 .settings .srow.clickable::after { display: none; }
+.plus-grid .ic.poll { width: 56px; min-width: 56px; max-width: 56px; }
