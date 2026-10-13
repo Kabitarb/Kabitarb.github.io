@@ -609,7 +609,12 @@ function renderChatList() {
   const el = $('chat-list');
   if (showArchived && !archived.length) showArchived = false;
   if (!items.length && !archived.length) {
-    el.innerHTML = `<div class="empty-list"><p>No close friends yet.</p><p class="tiny">Share your invite link or scan a friend's code to start.</p><button class="btn primary" id="empty-add">Add a friend</button></div>`;
+    el.innerHTML = `<div class="empty-list onboard"><h3>Welcome to Chatly</h3><p class="tiny">Three steps and you're in.</p>
+      <div class="steps">
+        <div class="step"><span class="n">1</span><div><b>Add a close friend</b><br><span class="tiny">by username or invite link — they accept, you're connected</span></div></div>
+        <div class="step"><span class="n">2</span><div><b>Chat &amp; call</b><br><span class="tiny">texts, voice notes, photos, voice &amp; video calls — all end-to-end encrypted</span></div></div>
+        <div class="step"><span class="n">3</span><div><b>Play &amp; watch together</b><br><span class="tiny">8 games, Watch together, Live TV — from the “+” button in any chat</span></div></div>
+      </div><button class="btn primary" id="empty-add">Add a friend</button></div>`;
     $('empty-add').onclick = openAddFriend; return;
   }
   const before = flipSnap(el);
