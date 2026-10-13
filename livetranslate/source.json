@@ -16,19 +16,19 @@
       "iconURL": "https://kabitarb.github.io/livetranslate/icon.png",
       "tintColor": "#0A84FF",
       "category": "utilities",
-      "version": "2.2",
+      "version": "2.3",
       "versionDate": "2026-10-13",
-      "versionDescription": "Floating window shows text only again (translated + English kept, in reading order). New Text tab to type or paste. Arabic dialect auto-detect (Gulf/UAE, Egyptian, Levantine/Jordan, Iraqi, Maghrebi) with dialect-aware translation. Faster translation. Fixes: crash when no microphone is available; clearer messages.",
-      "downloadURL": "https://kabitarb.github.io/livetranslate/LiveTranslate-2.2.ipa",
-      "size": 630167,
+      "versionDescription": "Floating window shows text only again (translated + English kept, in reading order). New Text tab to type or paste. Arabic dialect auto-detect (Gulf/UAE, Egyptian, Levantine/Jordan, Iraqi, Maghrebi) with dialect-aware translation. Faster translation. Fixes: the floating window no longer reads its own text back during screen share; crash when no microphone is available; clearer messages.",
+      "downloadURL": "https://kabitarb.github.io/livetranslate/LiveTranslate-2.3.ipa",
+      "size": 640488,
       "versions": [
         {
-          "version": "2.2",
-          "buildVersion": "4",
+          "version": "2.3",
+          "buildVersion": "5",
           "date": "2026-10-13",
-          "localizedDescription": "Floating window shows text only again (translated + English kept, in reading order). New Text tab to type or paste. Arabic dialect auto-detect (Gulf/UAE, Egyptian, Levantine/Jordan, Iraqi, Maghrebi) with dialect-aware translation. Faster translation. Fixes: crash when no microphone is available; clearer messages.",
-          "downloadURL": "https://kabitarb.github.io/livetranslate/LiveTranslate-2.2.ipa",
-          "size": 630167,
+          "localizedDescription": "Floating window shows text only again (translated + English kept, in reading order). New Text tab to type or paste. Arabic dialect auto-detect (Gulf/UAE, Egyptian, Levantine/Jordan, Iraqi, Maghrebi) with dialect-aware translation. Faster translation. Fixes: the floating window no longer reads its own text back during screen share; crash when no microphone is available; clearer messages.",
+          "downloadURL": "https://kabitarb.github.io/livetranslate/LiveTranslate-2.3.ipa",
+          "size": 640488,
           "minOSVersion": "18.0"
         },
         {
