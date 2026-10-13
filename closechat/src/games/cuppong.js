@@ -18,7 +18,7 @@ export const engine = {
   init() { return Object.assign(blank(), { round: 1, score: [0, 0] }); },
   apply(st, pi, mv) {
     if (engine.over(st) || st.turn !== pi) return false;
-    const vx = Number(mv.vx), vy = Number(mv.vy); if (!isFinite(vx) || !isFinite(vy) || vy >= 0 || Math.hypot(vx, vy) > 24) return false;
+    const vx = Number(mv.vx), vy = Number(mv.vy); if (!isFinite(vx) || !isFinite(vy) || vy >= 0 || Math.hypot(vx, vy) > 24.5) return false;
     const [lx, ly] = landing(vx, vy);
     const cups = st.cups[1 - pi];
     let hit = -1;
@@ -71,7 +71,7 @@ export function view(ctx) {
         cv = el.querySelector('#pong-cv'); g = cv.getContext('2d');
         cv.onpointerdown = (e) => { if (!s0 || playing || s0.players[s0.state.turn] !== ctx.pk || engine.over(s0.state)) return; cv.setPointerCapture(e.pointerId); drag = { p: pos(e), t: performance.now() }; e.preventDefault(); };
         cv.onpointermove = (e) => { if (!drag) return; const [x, y] = pos(e); const vx = (x - drag.p[0]) / 9, vy = (y - drag.p[1]) / 9; drag.v = [vx, vy]; if (vy < 0) draw(s0.state, null, { vx: Math.max(-24, Math.min(24, vx)), vy: Math.max(-24, vy) }); };
-        cv.onpointerup = () => { if (!drag) return; const v = drag.v; drag = null; if (!v || v[1] >= -3) { draw(s0.state); return; } let [vx, vy] = v; const sp = Math.hypot(vx, vy); if (sp > 24) { vx *= 24 / sp; vy *= 24 / sp; } ctx.haptic(15); ctx.fx(700, 0.06, 0, 0.06, 'sine'); ctx.move({ vx: Math.round(vx * 100) / 100, vy: Math.round(vy * 100) / 100 }); };
+        cv.onpointerup = () => { if (!drag) return; const v = drag.v; drag = null; if (!v || v[1] >= -3) { draw(s0.state); return; } let [vx, vy] = v; const sp = Math.hypot(vx, vy); if (sp > 23.9) { vx *= 23.9 / sp; vy *= 23.9 / sp; } ctx.haptic(15); ctx.fx(700, 0.06, 0, 0.06, 'sine'); ctx.move({ vx: Math.round(vx * 100) / 100, vy: Math.round(vy * 100) / 100 }); };
         cv.onpointercancel = () => { drag = null; draw(s0.state); };
       } else el.querySelector('.g-score').outerHTML = scoreStrip(ctx, s, over);
       s0 = s;
