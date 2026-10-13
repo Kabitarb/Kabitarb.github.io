@@ -589,7 +589,7 @@ function renderChatList() {
       ${avatarHtml(id)}
       <div class="body"><div class="top"><span class="name">${esc(app.nameOf(id))}<span class="flags">${chat.pin ? '📌' : ''}${chat.mute ? '🔕' : ''}${chat.expire ? '⏱' : ''}</span></span>${pending ? '<span class="pend">Request sent</span>' : `<span class="time">${fmtListTime(chat.lastTs)}</span>`}</div>
       <div class="preview"><span>${preview}</span>${unread ? `<span class="unread">${unread}</span>` : ''}</div></div></div>
-      <div class="acts"><button class="a-pin" data-act="pin"><span>📌</span>${chat.pin ? 'Unpin' : 'Pin'}</button><button class="a-mute" data-act="mute"><span>${chat.mute ? '🔔' : '🔕'}</span>${chat.mute ? 'Unmute' : 'Mute'}</button><button class="a-arch" data-act="arch"><span>🗄️</span>${chat.arch ? 'Unarchive' : 'Archive'}</button></div></div>`;
+      <div class="acts"><button class="a-pin" data-act="pin"><span>📌</span>${chat.pin ? 'Unpin' : 'Pin'}</button><button class="a-mute" data-act="mute"><span>${chat.mute ? '🔔' : '🔕'}</span>${chat.mute ? 'Unmute' : 'Mute'}</button><button class="a-arch" data-act="arch"><span>🗄️</span>${chat.arch ? 'Unarchive' : 'Archive'}</button><button class="a-unread" data-act="unread"><span>${chat.unread || chat.markUnread ? '✉️' : '🔵'}</span>${chat.unread || chat.markUnread ? 'Read' : 'Unread'}</button></div></div>`;
   }).join('') + (showArchived ? `<div class="archived-link" id="arch-link"><span>‹ Back to chats</span></div>` : archived.length ? `<div class="archived-link" id="arch-link"><span>🗄️ Archived</span><span>${archived.length}</span></div>` : '');
   el.querySelectorAll('.item').forEach((i) => {
     i.onclick = (e) => { if (e.target.closest('.acts')) return; if (i.classList.contains('swiped')) { unswipe(); return; } openChat(i.dataset.id); };
@@ -630,8 +630,8 @@ async function chatListMenu(id) {
     if (!item) return; const t = e.touches[0]; dx = t.clientX - sx;
     if (Math.abs(dx) > 8 || Math.abs(t.clientY - sy) > 8) clearTimeout(timer);
     if (Math.abs(t.clientY - sy) > 30) return;
-    const inner = item.querySelector('.inner'); const base = item.classList.contains('swiped') ? -216 : 0;
-    const x = Math.max(-216, Math.min(0, base + dx)); inner.style.transform = `translateX(${x}px)`;
+    const inner = item.querySelector('.inner'); const base = item.classList.contains('swiped') ? -272 : 0;
+    const x = Math.max(-272, Math.min(0, base + dx)); inner.style.transform = `translateX(${x}px)`;
   }, { passive: true });
   const end = (e) => {
     clearTimeout(timer); if (!item) return;
@@ -639,7 +639,7 @@ async function chatListMenu(id) {
     const inner = item.querySelector('.inner'); const was = item.classList.contains('swiped');
     const open = was ? dx < 60 : dx < -70;
     unswipe();
-    if (open) { item.classList.add('swiped'); inner.style.transform = 'translateX(-216px)'; } else inner.style.transform = '';
+    if (open) { item.classList.add('swiped'); inner.style.transform = 'translateX(-272px)'; } else inner.style.transform = '';
     item = null;
   };
   el.addEventListener('touchend', end); el.addEventListener('touchcancel', end);
@@ -1013,7 +1013,7 @@ function pickGroupPhoto(gid) {
     const img = new Image(); await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; }).catch(() => null);
     if (!img.width) { toast('Could not read that image', 'error'); return; }
     const out = await cropSheet(img); if (!out) return;
-    app.setGroupPhoto(gid, out); toast('Group photo updated'); renderedFor = null; renderChat(); scheduleRender();
+    app.setGroupPhoto(gid, out); hideModal(); toast('Group photo updated'); renderedFor = null; renderChat(); scheduleRender();
   };
 }
 function cropSheet(img) {
@@ -1293,6 +1293,7 @@ function renderChat(scrollToEnd = false) {
     box.querySelectorAll('[data-play]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); playVideo(el.dataset.play); }; });
     box.querySelectorAll('[data-aplay]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); playAudio(el.dataset.aplay); }; });
     box.querySelectorAll('[data-arate]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); cycleRate(el.dataset.arate); }; });
+    box.querySelectorAll('.voice .wave').forEach((w) => { w.onclick = (e) => { e.stopPropagation(); const r = w.getBoundingClientRect(); seekAudio(w.closest('.voice').dataset.aid, Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))); }; });
     box.querySelectorAll('[data-vote]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); const mid = el.closest('.poll').dataset.id; haptic(); app.vote(id, mid, Number(el.dataset.vote)); renderedFor = null; renderChat(); }; });
     box.querySelectorAll('.msg.anim[data-id]').forEach((el) => { const m = byId.get(el.dataset.id); if (m && m.fx && m.from !== app.pk && !playedFx.has(m.id)) { playedFx.add(m.id); playEffect(m.fx); } });
     box.querySelectorAll('.vid video').forEach((el) => { el.onclick = (e) => e.stopPropagation(); });
@@ -1403,11 +1404,22 @@ function audioHtml(m) {
   const pos = el && el.duration ? el.currentTime / el.duration : 0;
   return `<div class="voice" data-aid="${m.id}">${btn}<div class="wave" style="--pos:${Math.round(pos * 100)}%">${w}</div><span class="adur">${fmtClock(el && !el.paused ? Math.round(el.currentTime) : (a.dur || 0))}</span>${el ? `<button class="arate" data-arate="${m.id}">${audioRate[m.id] || 1}×</button>` : ''}</div>`;
 }
+async function seekAudio(id, frac) {
+  if (!audioEls[id]) await playAudio(id);
+  const el = audioEls[id]; if (!el) return;
+  const hit = app.findMessage(id); const d = isFinite(el.duration) && el.duration ? el.duration : (hit && hit.m.audio && hit.m.audio.dur) || 0;
+  if (!d) return;
+  el.currentTime = frac * d;
+  const v = document.querySelector(`.voice[data-aid="${id}"] .wave`); if (v) v.style.setProperty('--pos', Math.round(frac * 100) + '%');
+  if (el.paused) el.play().catch(() => {});
+}
 async function playAudio(id) {
   let el = audioEls[id];
   if (!el) {
     const data = await app.getVideo(id); if (!data) { toast('Voice message is not on this device'); return; }
     el = audioEls[id] = new Audio(data); el.playbackRate = audioRate[id] || 1;
+    await new Promise((res) => { let done = false; const ok = () => { if (!done) { done = true; res(); } }; el.onloadedmetadata = () => { if (isFinite(el.duration)) return ok(); el.ondurationchange = () => { if (isFinite(el.duration)) { el.ondurationchange = null; el.currentTime = 0; ok(); } }; el.currentTime = 1e101; }; el.onerror = ok; setTimeout(ok, 1500); });
+    if (audioEls[id] !== el) return; el.currentTime = 0;
     el.ontimeupdate = () => { const v = document.querySelector(`.voice[data-aid="${id}"]`); if (!v) return; const w = v.querySelector('.wave'); if (w && el.duration) w.style.setProperty('--pos', Math.round(el.currentTime / el.duration * 100) + '%'); const d = v.querySelector('.adur'); if (d) d.textContent = fmtClock(Math.round(el.currentTime)); };
     el.onended = () => { renderedFor = null; renderChat(); const hit = app.findMessage(id); if (hit) { const next = app.store.chat(hit.chatId).messages.find((x) => x.kind === 'audio' && x.ts > hit.m.ts && x.from !== app.pk && x.audio && x.audio.ready && !audioEls[x.id]); if (next) playAudio(next.id); } };
     el.onpause = () => { renderedFor = null; renderChat(); };
@@ -1543,10 +1555,11 @@ $('reply-cancel').onclick = () => { replyTo = null; renderReplyBar(); };
     app.react(app.openChat, mid, '❤️'); haptic(12); fx(1000, 0.08, 0, 0.04, 'sine');
     if (!reducedMotion()) { const h = document.createElement('div'); h.className = 'heart-pop'; h.textContent = '❤️'; h.style.left = x + 'px'; h.style.top = y + 'px'; document.body.appendChild(h); setTimeout(() => h.remove(), 900); }
   };
-  box.addEventListener('dblclick', (e) => { const m = msgOf(e.target); if (!m) return; if (window.innerWidth >= 860 && !e.target.closest('.bubble')) setReply(m.dataset.id); else heartTap(m, e.clientX, e.clientY); });
+  const isCtl = (t) => !!t.closest('button, a, input, .wave, .rx-chips, .poll, video, audio');
+  box.addEventListener('dblclick', (e) => { if (isCtl(e.target)) return; const m = msgOf(e.target); if (!m) return; if (window.innerWidth >= 860 && !e.target.closest('.bubble')) setReply(m.dataset.id); else heartTap(m, e.clientX, e.clientY); });
   let lastTap = { t: 0, id: '' };
   box.addEventListener('touchend', (e) => {
-    const m = msgOf(e.target); if (!m || e.changedTouches.length !== 1) return;
+    if (isCtl(e.target)) { lastTap = { t: 0, id: '' }; return; } const m = msgOf(e.target); if (!m || e.changedTouches.length !== 1) return;
     const now = Date.now(); const t = e.changedTouches[0];
     if (now - lastTap.t < 320 && lastTap.id === m.dataset.id) { e.preventDefault(); lastTap = { t: 0, id: '' }; heartTap(m, t.clientX, t.clientY); }
     else lastTap = { t: now, id: m.dataset.id };
@@ -2750,6 +2763,7 @@ function importChats() {
           if (m.deleted && !cur.deleted) app.tombstone(cur);
           else if (!cur.deleted && m.edited && (m.editTs || 0) > (cur.editTs || 0)) { cur.text = m.text; cur.edited = true; cur.editTs = m.editTs; }
           if (m.star) cur.star = true;
+          for (const k of ['audio', 'video']) if (m[k] && m[k].ready && !m[k].deleted && data.blobs && data.blobs[m.id] && !(cur[k] && cur[k].ready)) cur[k] = Object.assign({}, m[k]);
           for (const k of ['votes', 'rx']) if (m[k]) for (const [pk, v] of Object.entries(m[k])) { const o = cur[k] && cur[k][pk]; if (o === undefined || ((v && v.ts) || 0) > ((o && o.ts) || 0)) (cur[k] = cur[k] || {})[pk] = v; }
         }
         mine.messages.sort((a, b) => a.ts - b.ts); mine.lastTs = Math.max(mine.lastTs || 0, chat.lastTs || 0);
