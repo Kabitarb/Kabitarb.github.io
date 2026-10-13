@@ -40,6 +40,17 @@ const blank = () => ({ phase: 'place', ships: [null, null], shots: [Array(N * N)
 export const engine = {
   init() { return Object.assign(blank(), { round: 1, score: [0, 0] }); },
   myTurn(st, my) { return st.phase === 'place' ? !st.ships[my] : st.turn === my; },
+  merge(st, remote) {
+    if (st.phase !== 'place' || !remote || remote.phase === undefined) return false;
+    let changed = false;
+    for (let i = 0; i < 2; i++) {
+      if (!st.ships[i] && remote.ships && remote.ships[i] && validFleet(remote.ships[i])) {
+        st.ships[i] = remote.ships[i].map((s) => ({ r: s.r, c: s.c, len: s.len, dir: s.dir ? 1 : 0 })); changed = true;
+      }
+    }
+    if (changed) { st.n = Math.max(st.n, remote.n || 0) + 1; if (st.ships[0] && st.ships[1]) st.phase = 'play'; }
+    return changed;
+  },
   apply(st, pi, mv) {
     if (engine.over(st)) return false;
     if (mv.a === 'place') {

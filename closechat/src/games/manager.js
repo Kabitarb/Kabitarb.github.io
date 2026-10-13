@@ -71,13 +71,19 @@ export class GameManager extends EventTarget {
     this.send(s, { a: 'start', players: s.players, state: s.state, seq: s.seq, seed: s.seed });
     this.emit('update', { id });
   }
+  seriesWinner(s) {
+    const n = GAMES[s.type]?.series, sc = s.state?.score;
+    if (!(n > 1) || !Array.isArray(sc) || !this.engine(s).over(s.state)) return -1;
+    const need = Math.ceil(n / 2);
+    return sc.findIndex((x) => x >= need);
+  }
   move(id, mv) {
     const s = this.get(id); if (!s || s.status !== 'playing') return false;
     const pi = this.myIndex(s); if (pi < 0) return false;
     const E = this.engine(s);
     let ok;
     if (mv && mv.a === 'again') {
-      if (!E.over(s.state) || !E.again) return false;
+      if (!E.over(s.state) || !E.again || this.seriesWinner(s) >= 0) return false;
       E.again(s.state, pi); ok = true;
     } else ok = E.apply(s.state, pi, mv);
     if (!ok) return false;
@@ -138,6 +144,10 @@ export class GameManager extends EventTarget {
       case 'move':
         if (!s || s.chatId !== chatId || s.status !== 'playing' || !s.players.includes(from)) return;
         if (!c.state) return;
+        if (Number(c.seq) === s.seq && from !== me && this.engine(s).merge && this.engine(s).merge(s.state, c.state)) {
+          // Both sides moved concurrently off the same seq (e.g. fleet placement): merge deterministically and advance.
+          s.seq++; s.ts = Date.now(); this.app.store.save(); this.emit('update', { id }); return;
+        }
         if (!(Number(c.seq) > s.seq)) {
           // Peer is behind (their last update to us was lost): push our newer state back, at most every 3 s.
           if (from !== me && Number(c.seq) < s.seq && (this._resyncAt?.[id] || 0) < Date.now() - 3000) {

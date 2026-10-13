@@ -2372,13 +2372,13 @@ function renderGame() {
   try { gameView.update(s); } catch (e) { console.error(e); body.innerHTML = `<div class="game-status">Could not draw the game (${esc(e.message)})</div>`; }
   let ov = body.querySelector('.g-result');
   if (over) {
-    const st = s.state, w = st.winner, won = w === my, draw = w === null || w === undefined || w < 0;
+    const st = s.state, w = st.winner, won = w === my, draw = w === null || w === undefined || w < 0, sw = games.seriesWinner(s), seriesOver = sw >= 0;
     if (!ov) { ov = document.createElement('div'); ov.className = 'g-result'; body.appendChild(ov); }
-    ov.innerHTML = `<div class="g-result-card"><div class="g-trophy">${draw ? '🤝' : won ? '🏆' : '😮'}</div><h3>${draw ? "It's a draw" : won ? 'You win!' : esc(app.nameOf(s.players[w])) + ' wins'}</h3>
+    ov.innerHTML = `<div class="g-result-card"><div class="g-trophy">${draw ? '🤝' : won ? '🏆' : '😮'}</div><h3>${seriesOver ? (sw === my ? 'You win the match!' : esc(app.nameOf(s.players[sw])) + ' wins the match') : draw ? "It's a draw" : won ? 'You win!' : esc(app.nameOf(s.players[w])) + ' wins'}</h3>
       ${st.score ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(p === app.pk ? 'You' : app.nameOf(p))} <b>${st.score[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : ''}
-      <div class="g-result-actions"><button class="btn ghost" id="g-result-look">Look at board</button><button class="btn primary" data-game-act="again">Rematch</button></div>
+      <div class="g-result-actions"><button class="btn ghost" id="g-result-look">Look at board</button><button class="btn primary" data-game-act="again">${seriesOver ? 'New match' : 'Rematch'}</button></div>
       <button class="link" id="g-result-leave">Leave game</button></div>`;
-    ov.querySelector('[data-game-act=again]').onclick = () => { haptic(); games.move(s.id, { a: 'again' }); };
+    ov.querySelector('[data-game-act=again]').onclick = () => { haptic(); if (seriesOver) { games.quit(s.id); try { openGame(games.invite(s.chatId, s.type).id); } catch (e) { toast(e.message, 'error'); } } else games.move(s.id, { a: 'again' }); };
     ov.querySelector('#g-result-look').onclick = () => { ov.classList.add('peek'); setTimeout(() => ov && ov.classList.remove('peek'), 4000); };
     ov.querySelector('#g-result-leave').onclick = leaveGame;
     const doneKey = s.id + ':' + (st.round || 1);

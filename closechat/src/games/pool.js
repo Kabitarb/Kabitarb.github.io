@@ -87,7 +87,7 @@ export const engine = {
     if (scratch) { foul = true; msg = 'Scratch!'; }
     if (eight) {
       const cleared = mine && left(mine) === 0;
-      if (!cleared || scratch) { st.winner = 1 - pi; msg = scratch ? '8-ball with a scratch — lose' : '8-ball too early — lose'; }
+      if (!cleared || foul) { st.winner = 1 - pi; msg = scratch ? '8-ball with a scratch — lose' : !cleared ? '8-ball too early — lose' : 'Foul on the 8-ball — lose'; }
       else { st.winner = pi; msg = '8-ball! Win'; }
       st.score[st.winner]++;
     } else {
