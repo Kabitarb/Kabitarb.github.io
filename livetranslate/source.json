@@ -1,0 +1,39 @@
+{
+  "name": "Live Translate",
+  "identifier": "io.github.kabitarb.livetranslate",
+  "subtitle": "Updates for Live Translate",
+  "description": "Live speech, camera and screen translation for iPhone.",
+  "website": "https://kabitarb.github.io/livetranslate/",
+  "iconURL": "https://kabitarb.github.io/livetranslate/icon.png",
+  "tintColor": "#0A84FF",
+  "apps": [
+    {
+      "name": "Live Translate",
+      "bundleIdentifier": "com.kabitarb.livetranslate",
+      "developerName": "Kabita Rajbanshi",
+      "subtitle": "Translate speech, camera and screen",
+      "localizedDescription": "Live speech translation with Arabic dialect auto-detect, camera and screenshot translation, a floating window that shows your screen with the words replaced, live captions for audio, a Safari extension, and 29 languages.",
+      "iconURL": "https://kabitarb.github.io/livetranslate/icon.png",
+      "tintColor": "#0A84FF",
+      "category": "utilities",
+      "version": "2.1",
+      "versionDate": "2026-10-13",
+      "versionDescription": "In-app updates: the app tells you when a new version is out and opens it in Feather with one tap.",
+      "downloadURL": "https://kabitarb.github.io/livetranslate/LiveTranslate-2.1.ipa",
+      "size": 571389,
+      "versions": [
+        {
+          "version": "2.1",
+          "buildVersion": "3",
+          "date": "2026-10-13",
+          "localizedDescription": "In-app updates: the app tells you when a new version is out and opens it in Feather with one tap.",
+          "downloadURL": "https://kabitarb.github.io/livetranslate/LiveTranslate-2.1.ipa",
+          "size": 571389,
+          "minOSVersion": "18.0"
+        }
+      ],
+      "appPermissions": { "entitlements": [], "privacy": {} }
+    }
+  ],
+  "news": []
+}
