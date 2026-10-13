@@ -1287,3 +1287,10 @@ button, .icon-btn { -webkit-touch-callout: none; }
 #game[data-game="pool"].full .game-body { overflow-y: auto; justify-content: flex-start; }
 #game[data-game="pool"].full .game-body .g-score { flex: none; }
 .pool-wrap + .game-status, .pong-wrap + .game-status { flex: none; padding-bottom: 6px; }
+.plus-grid .ic.poll, .plus-grid .poll { min-width: 0; width: auto; max-width: none; padding: 0; margin: 0; }
+#auth { overflow-x: hidden; overflow-y: auto; }
+#auth::before, #auth::after { display: none; }
+#auth .auth-card::before, #auth .auth-card::after { content: ''; position: absolute; border-radius: 50%; filter: blur(50px); opacity: .35; pointer-events: none; z-index: -1; }
+#auth .auth-card::before { width: 260px; height: 260px; left: -40px; top: -60px; background: var(--accent); }
+#auth .auth-card::after { width: 220px; height: 220px; right: -30px; bottom: -40px; background: var(--accent-2); }
+.settings .srow.clickable::after { display: none; }
