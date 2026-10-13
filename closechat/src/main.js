@@ -90,6 +90,7 @@ async function checkShellUpdate() {
     el.innerHTML = `<div class="grow"><div>Chatly ${esc(a.version)} for iPhone is ready</div><div class="tiny">${esc((a.versionDescription || '').slice(0, 90))}</div></div><button class="later">Later</button><button class="go">Update</button>`;
     el.querySelector('.go').onclick = () => { haptic(); location.href = 'app/'; };
     el.querySelector('.later').onclick = () => { settings.set({ skipShell: a.version }); el.classList.add('hidden'); };
+    setTimeout(() => el.classList.add('hidden'), 20000);
   } catch {}
 }
 function applyKeepAlive() { if (nativeKeep) nativePost(nativeKeep, settings.get().bgKeepAlive !== false ? 'on' : 'off'); }
