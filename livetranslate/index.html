@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Translate – install &amp; updates</title>
+<link rel="apple-touch-icon" href="icon.png">
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 17px -apple-system, system-ui, sans-serif; margin: 0; padding: 28px 20px 48px; max-width: 560px; margin-inline: auto; }
+  header { display: flex; gap: 16px; align-items: center; margin-bottom: 22px; }
+  header img { width: 76px; height: 76px; border-radius: 18px; }
+  h1 { font-size: 26px; margin: 0; }
+  .ver { opacity: .65; font-size: 15px; }
+  a.btn, button.btn { display: block; width: 100%; box-sizing: border-box; text-align: center; padding: 15px; margin: 10px 0; border-radius: 14px;
+    font: 600 17px -apple-system, system-ui; text-decoration: none; border: 0; cursor: pointer; }
+  .primary { background: #0a84ff; color: #fff; }
+  .secondary { background: rgba(120,120,128,.18); color: inherit; }
+  code { display: block; word-break: break-all; padding: 12px; border-radius: 10px; background: rgba(120,120,128,.14); font-size: 14px; }
+  h2 { font-size: 19px; margin-top: 30px; }
+  ol { padding-left: 22px; } li { margin: 6px 0; }
+  #notes { white-space: pre-line; }
+</style>
+</head>
+<body>
+<header>
+  <img src="icon.png" alt="">
+  <div><h1>Live Translate</h1><div class="ver" id="ver">Loading…</div></div>
+</header>
+
+<a class="btn primary" id="feather-source" href="#">Add source to Feather</a>
+<a class="btn secondary" id="feather-install" href="#">Install latest in Feather</a>
+<a class="btn secondary" id="ipa" href="#">Download .ipa (ESign / Scarlet / Sideloadly)</a>
+
+<h2>Source link (ESign, Scarlet, AltStore)</h2>
+<code id="src"></code>
+<button class="btn secondary" id="copy">Copy source link</button>
+
+<h2>What's new</h2>
+<p id="notes"></p>
+
+<h2>How updates work</h2>
+<ol>
+  <li>Add the source once (Feather: top button; ESign / Scarlet: paste the source link in Sources).</li>
+  <li>Install Live Translate <b>from the source</b> so your signer can track it.</li>
+  <li>When a new version is posted, the app shows <b>Update available</b> and your signer shows an Update button. Your settings are kept.</li>
+</ol>
+
+<script>
+  const SRC = new URL("source.json", location.href).href;
+  document.getElementById("src").textContent = SRC;
+  document.getElementById("feather-source").href = "feather://source/" + SRC;
+  document.getElementById("copy").onclick = async () => {
+    try { await navigator.clipboard.writeText(SRC); document.getElementById("copy").textContent = "Copied"; } catch (e) {}
+  };
+  fetch(SRC, { cache: "no-store" }).then(r => r.json()).then(s => {
+    const app = s.apps[0], v = (app.versions && app.versions[0]) || app;
+    const ipa = new URL(v.downloadURL, location.href).href;
+    document.getElementById("ver").textContent = "Version " + v.version + " · " + (v.date || "");
+    document.getElementById("notes").textContent = v.localizedDescription || "";
+    document.getElementById("ipa").href = ipa;
+    document.getElementById("feather-install").href = "feather://install/" + ipa;
+  });
+</script>
+</body>
+</html>
