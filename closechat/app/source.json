@@ -15,12 +15,21 @@
       "iconURL": "https://kabitarb.github.io/closechat/icons/icon-192.png",
       "tintColor": "#3b82f6",
       "category": "social",
-      "version": "1.4",
+      "version": "1.5",
       "versionDate": "2026-10-13",
-      "downloadURL": "https://kabitarb.github.io/closechat/app/Chatly-1.4.ipa",
-      "size": 406545,
-      "versionDescription": "Background/foreground hook so messages and calls resume right after reopening; login only for existing accounts; unique usernames.",
+      "downloadURL": "https://kabitarb.github.io/closechat/app/Chatly-1.5.ipa",
+      "size": 418073,
+      "versionDescription": "Stay connected in background (Settings switch): messages arrive as iOS banners with a Reply box and calls as Answer / Decline banners while Chatly is minimized; in-app update banner.",
       "versions": [
+        {
+          "version": "1.5",
+          "buildVersion": "5",
+          "date": "2026-10-13",
+          "downloadURL": "https://kabitarb.github.io/closechat/app/Chatly-1.5.ipa",
+          "size": 418073,
+          "localizedDescription": "Stay connected in background (Settings switch): messages arrive as iOS banners with a Reply box and calls as Answer / Decline banners while Chatly is minimized; in-app update banner.",
+          "minOSVersion": "15.0"
+        },
         {
           "version": "1.4",
           "buildVersion": "4",
@@ -39,5 +48,15 @@
       }
     }
   ],
-  "news": []
+  "news": [
+    {
+      "title": "Chatly 1.5 \u2014 background notifications",
+      "identifier": "chatly-1-5",
+      "caption": "Reply to messages and answer calls from the banner while Chatly is minimized.",
+      "date": "2026-10-13",
+      "tintColor": "#3b82f6",
+      "notify": true,
+      "appID": "com.kabitarb.closechat"
+    }
+  ]
 }
