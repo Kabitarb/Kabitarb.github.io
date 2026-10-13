@@ -89,8 +89,13 @@ export class App extends EventTarget {
   // dead relay sockets and re-subscribe so nothing sent while we were frozen is missed.
   async resume(force = false) {
     if (!this.ready) return;
+    if (this._resuming) return this._resuming;
     if (!force && Date.now() - this.lastResume < 10000) return;
     this.lastResume = Date.now();
+    this._resuming = this._resume(force).finally(() => { this._resuming = null; });
+    return this._resuming;
+  }
+  async _resume(force) {
     this.emit('resuming');
     try { if (force) await this.transport.hardReconnect(); else await this.transport.reconnect(); } catch {}
     this.lastProbe = Date.now();

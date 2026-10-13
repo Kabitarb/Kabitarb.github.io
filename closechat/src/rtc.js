@@ -25,7 +25,7 @@ export class CallManager extends EventTarget {
     this.pendingIce = []; this.iceQueue = []; this.iceTimer = null;
     this.startedAt = 0; this.pendingOffer = null; this.muted = false; this.camOff = false;
     this.facing = 'user'; this.sharing = false; this.remoteVideo = false; this.camTrack = null;
-    clearTimeout(this.ringTimer); clearTimeout(this.connectTimer);
+    clearTimeout(this.ringTimer); clearTimeout(this.connectTimer); clearInterval(this.reinvite);
   }
 
   emit(type, detail) { this.dispatchEvent(new CustomEvent(type, { detail })); }
@@ -96,7 +96,12 @@ export class CallManager extends EventTarget {
       for (const t of this.local.getTracks()) pc.addTrack(t, this.local);
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
-      await this.signal({ a: 'offer', sdp: offer.sdp, video: this.video, name: this.app.state.profile.name });
+      const invite = { a: 'offer', sdp: offer.sdp, video: this.video, name: this.app.state.profile.name };
+      await this.signal(invite);
+      // Ring signals are ephemeral (relays don't store them): a peer that is
+      // mid-reconnect misses the first one, so keep re-inviting while ringing.
+      clearInterval(this.reinvite);
+      this.reinvite = setInterval(() => { if (this.state === 'outgoing') this.signal(invite).catch(() => {}); else clearInterval(this.reinvite); }, 4000);
       this.emit('outgoing', { peer: this.peer, video: this.video });
       this.emit('ringing');
       this.ringTimer = setTimeout(() => { if (this.state === 'outgoing') this.end('no-answer'); }, RING_TIMEOUT);
