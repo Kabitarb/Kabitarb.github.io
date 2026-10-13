@@ -1,0 +1,19 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>Install Chatly for iPhone</title>
+<link rel="icon" href="../icons/icon-192.png"><style>
+:root{color-scheme:dark}body{margin:0;font-family:-apple-system,system-ui,sans-serif;background:#0b1016;color:#e8edf3;display:flex;justify-content:center;padding:32px 16px}
+main{max-width:460px;width:100%}img{width:96px;height:96px;border-radius:24px;display:block;margin:0 auto 12px}h1{text-align:center;margin:0 0 4px;font-size:28px}
+p.sub{text-align:center;color:#9aa7b5;margin:0 0 24px}a.btn{display:block;text-align:center;padding:14px 18px;border-radius:14px;background:#1a2330;color:#e8edf3;text-decoration:none;font-weight:600;margin:10px 0}
+a.btn.primary{background:linear-gradient(135deg,#3b82f6,#60a5fa);color:#fff}small{display:block;color:#9aa7b5;font-weight:400;margin-top:3px}
+section{background:#121a24;border-radius:16px;padding:16px;margin-top:20px}h2{font-size:15px;margin:0 0 8px;color:#9aa7b5;text-transform:uppercase;letter-spacing:.04em}ol{margin:0;padding-left:20px;color:#c6d0db;line-height:1.5}
+.v{text-align:center;color:#9aa7b5;font-size:13px;margin-top:20px}</style></head><body><main>
+<img src="../icons/icon-192.png" alt=""><h1>Chatly for iPhone</h1><p class="sub">Version <span id="ver">…</span> · unsigned .ipa, sideload with Feather, ESign or Scarlet</p>
+<a class="btn primary" id="feather" href="#">Install with Feather<small>opens Feather and installs/updates in place</small></a>
+<a class="btn" id="source" href="#">Add Chatly source to Feather<small>one-time; after that use Feather's Update button</small></a>
+<a class="btn" id="dl" href="#">Download .ipa<small>for ESign / Scarlet: import the file there</small></a>
+<section><h2>No sideloading app?</h2><ol><li>Open <b>https://kabitarb.github.io/closechat/</b> in Safari.</li><li>Tap Share → <b>Add to Home Screen</b>.</li><li>Open Chatly from the Home Screen — same app, and it can show notifications when closed.</li></ol></section>
+<section><h2>What's new</h2><p id="notes" style="margin:0;color:#c6d0db;line-height:1.5"></p></section>
+<p class="v">Everything inside the app updates automatically — you only need a new .ipa when this page shows a newer version than Settings → About in your app.</p>
+</main><script>
+fetch('source.json',{cache:'no-store'}).then(r=>r.json()).then(s=>{const a=s.apps[0];document.getElementById('ver').textContent=a.version;document.getElementById('notes').textContent=a.versionDescription;
+document.getElementById('feather').href='feather://install/'+a.downloadURL;document.getElementById('source').href='feather://source/'+location.href.replace(/[^/]*$/,'')+'source.json';document.getElementById('dl').href=a.downloadURL;}).catch(()=>{document.getElementById('ver').textContent='?'});
+</script></body></html>

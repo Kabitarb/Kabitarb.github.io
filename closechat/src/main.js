@@ -70,6 +70,29 @@ function toast(msg, type = '') {
 const native = (window.webkit && window.webkit.messageHandlers) || {};
 const nativeAudio = native.audioRoute || null;   // iOS shell: earpiece/speaker routing
 const nativeHaptic = native.haptic || null;      // iOS shell: vibration (no navigator.vibrate in WebKit)
+const nativeNotify = native.notify || null;      // iOS shell: local notifications with Reply / Answer / Decline
+const nativeKeep = native.keepAlive || null;     // iOS shell: stay connected while minimized
+const shellVersion = (navigator.userAgent.match(/CloseChatiOS\/(\d+(?:\.\d+)*)/) || [])[1] || '';
+let shellBg = false;                              // iOS shell told us it is minimized
+function nativePost(h, msg) { try { h.postMessage(typeof msg === 'string' ? msg : JSON.stringify(msg)); } catch {} }
+// iPhone shell: compare the shell's version (from the user agent) with app/source.json and
+// offer the in-place update (Feather / ESign source) when a newer .ipa exists.
+async function checkShellUpdate() {
+  if (!shellVersion) return;
+  try {
+    const r = await fetch('app/source.json', { cache: 'no-store' });
+    const a = (await r.json()).apps[0];
+    const newer = (x, y) => { const p = x.split('.').map(Number), q = y.split('.').map(Number); for (let i = 0; i < Math.max(p.length, q.length); i++) { if ((p[i] || 0) !== (q[i] || 0)) return (p[i] || 0) > (q[i] || 0); } return false; };
+    if (!newer(a.version, shellVersion) || settings.get().skipShell === a.version) return;
+    let el = $('update-banner');
+    if (!el) { el = document.createElement('div'); el.id = 'update-banner'; document.body.appendChild(el); }
+    el.className = '';
+    el.innerHTML = `<div class="grow"><div>Chatly ${esc(a.version)} for iPhone is ready</div><div class="tiny">${esc((a.versionDescription || '').slice(0, 90))}</div></div><button class="later">Later</button><button class="go">Update</button>`;
+    el.querySelector('.go').onclick = () => { haptic(); location.href = 'app/'; };
+    el.querySelector('.later').onclick = () => { settings.set({ skipShell: a.version }); el.classList.add('hidden'); };
+  } catch {}
+}
+function applyKeepAlive() { if (nativeKeep) nativePost(nativeKeep, settings.get().bgKeepAlive !== false ? 'on' : 'off'); }
 function haptic(ms = 12) {
   if (!settings.get().haptics) return;
   if (nativeHaptic) { try { nativeHaptic.postMessage(Array.isArray(ms) || ms >= 100 ? 'ring' : 'tap'); } catch {} return; }
@@ -404,6 +427,8 @@ async function startApp(sk, newName, username) {
   });
   app = new App(sk, store, transport);
   window.__chatly = app; // diagnostics / tests
+  applyKeepAlive();
+  checkShellUpdate();
   accountSk = sk;
   app.sharePresence = s.presence !== false;
   calls = new CallManager(app);
@@ -452,12 +477,12 @@ function wireApp() {
     const { pk, chatId, message, fresh } = e.detail;
     if (!fresh) return;
     const s = settings.get();
-    const onScreen = app.openChat === chatId && !document.hidden;
+    const onScreen = app.openChat === chatId && !document.hidden && !shellBg;
     const muted = !!app.store.chat(chatId).mute;
     if (muted && !onScreen) { updateBadge(); return; }
     if (!onScreen) {
       if (s.sounds) tones.notify();
-      if (s.notifications && document.hidden) {
+      if (s.notifications && (document.hidden || shellBg)) {
         const body = (isGroupId(chatId) ? app.nameOf(pk) + ': ' : '') + previewOf(message).slice(0, 100);
         messageNotification(app.nameOf(chatId), body, chatId);
       }
@@ -505,8 +530,10 @@ function wireApp() {
   window.addEventListener('pageshow', (e) => { if (e.persisted) wake('pageshow'); });
   window.addEventListener('online', () => wake('online'));
   // Native iOS shell tells us when the app returns to the foreground (timers were frozen).
-  window.addEventListener('chatly:foreground', () => { app.setVisible(true); if (app.openChat) app.markRead(app.openChat); wake('foreground'); });
-  window.addEventListener('chatly:background', () => { if (!hiddenAt) hiddenAt = Date.now(); app.setVisible(false); });
+  window.addEventListener('chatly:foreground', () => {
+  shellBg = false; app.setVisible(true); if (app.openChat) app.markRead(app.openChat); wake('foreground'); });
+  window.addEventListener('chatly:background', () => {
+  shellBg = true; if (!hiddenAt) hiddenAt = Date.now(); app.setVisible(false); });
   window.addEventListener('focus', () => { if (!document.hidden && hiddenAt) wake('visible'); });
   app.addEventListener('resuming', () => showSync(true));
   app.addEventListener('resumed', () => showSync(false));
@@ -803,6 +830,7 @@ function renderSettings() {
       <div class="srow"><span>Message notifications</span><button class="switch ${s.notifications ? 'on' : ''}" data-set="notifications"></button></div>
       <div class="srow"><span>Sounds</span><button class="switch ${s.sounds ? 'on' : ''}" data-set="sounds"></button></div>
       <div class="srow"><span>Vibration</span><button class="switch ${s.haptics ? 'on' : ''}" data-set="haptics"></button></div>
+      ${nativeKeep ? `<div class="srow"><div><div>Stay connected in background</div><div class="tiny muted">Keeps Chatly online while minimized, so messages arrive as banners you can reply to and calls show Answer / Decline. Uses some battery.</div></div><button class="switch ${s.bgKeepAlive !== false ? 'on' : ''}" data-set="bgKeepAlive"></button></div>` : ''}
       <div class="srow" style="flex-direction:column;align-items:stretch;gap:4px"><div class="row" style="justify-content:space-between;align-items:center"><span>When the app is closed</span><button class="switch ${s.push ? 'on' : ''}" data-set="push"></button></div><span class="tiny muted">${pushHint()}</span></div>
     </div>
     <h4>Network</h4>
@@ -834,7 +862,8 @@ function renderSettings() {
   el.querySelectorAll('.swatch').forEach((b) => { b.onclick = () => withTransition(() => { settings.set({ accent: b.dataset.accent }); applyTheme(); renderSettings(); }); });
   el.querySelectorAll('.switch').forEach((b) => {
     b.onclick = () => {
-      const k = b.dataset.set; const cur = k === 'presence' ? settings.get().presence !== false : settings.get()[k]; const v = !cur; settings.set({ [k]: v });
+      const k = b.dataset.set; const cur = k === 'presence' ? settings.get().presence !== false : k === 'bgKeepAlive' ? settings.get().bgKeepAlive !== false : settings.get()[k]; const v = !cur; settings.set({ [k]: v });
+      if (k === 'bgKeepAlive') { applyKeepAlive(); toast(v ? 'Chatly stays connected while minimized' : 'Chatly will pause while minimized'); }
       if (k === 'presence') { app.setSharePresence(v); toast(v ? 'Friends can see when you are online' : 'Your online status is hidden'); }
       if (k === 'notifications' && v && 'Notification' in window) Notification.requestPermission().catch(() => {});
       if (k === 'discoverable') { app.publishDirectory(v); toast(v ? 'Friends can now find you by username' : 'Removed from username lookup'); }
@@ -2513,16 +2542,19 @@ $('speaker-btn').onclick = () => { haptic(); setSpeaker(!speakerOn); };
 // System notification for a message while the app is in the background. Goes through the
 // service worker where possible (required on iOS home-screen apps), else the plain API.
 async function messageNotification(title, body, chatId) {
+  if (nativeNotify) { nativePost(nativeNotify, { kind: 'message', title, body, chatId }); return; }
   if (!('Notification' in window) || Notification.permission !== 'granted') return;
   try {
     const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration());
-    if (reg) { await reg.showNotification(title, { body, tag: 'chat:' + chatId, renotify: true, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', data: { kind: 'message', chatId } }); return; }
+    if (reg) { await reg.showNotification(title, { body, tag: 'chat:' + chatId, renotify: true, icon: 'icons/icon-192.png', badge: 'icons/icon-192.png', data: { kind: 'message', chatId }, actions: [{ action: 'reply', type: 'text', title: 'Reply', placeholder: 'Message…' }] }); return; }
   } catch {}
   try { const n = new Notification(title, { body, tag: chatId, icon: 'icons/icon-192.png' }); n.onclick = () => { window.focus(); openChat(chatId); n.close(); }; } catch {}
 }
 function updateBadge() {
-  if (!app || !('setAppBadge' in navigator)) return;
+  if (!app) return;
   const n = Object.entries(app.state.chats).filter(([id]) => app.canChat(id)).reduce((a, [, c]) => a + (c.unread || 0), 0);
+  if (nativeNotify) { nativePost(nativeNotify, { kind: 'badge', n }); return; }
+  if (!('setAppBadge' in navigator)) return;
   (n ? navigator.setAppBadge(n) : navigator.clearAppBadge()).catch(() => {});
 }
 /* ---------------- Web Push (closed app) ---------------- */
@@ -2575,8 +2607,9 @@ function nudge(to, kind) {
   rc.pushNudge(accountSk, list, kind).catch(() => {});
 }
 async function callNotification(info) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
   const title = app.nameOf(info.peer), body = `Incoming ${info.video ? 'video' : 'voice'} call — tap to answer`;
+  if (nativeNotify) { nativePost(nativeNotify, { kind: 'call', title, body, chatId: info.peer }); return; }
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
   try {
     const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration());
     if (reg) { await reg.showNotification(title, { body, tag: 'call', renotify: true, requireInteraction: true, icon: 'icons/icon-192.png', vibrate: [400, 200, 400, 200, 400], data: { kind: 'call' }, actions: [{ action: 'accept', title: 'Accept' }, { action: 'decline', title: 'Decline' }] }); return; }
@@ -2585,16 +2618,36 @@ async function callNotification(info) {
   n.onclick = () => { window.focus(); n.close(); };
 }
 async function closeCallNotification() {
+  if (nativeNotify) { nativePost(nativeNotify, { kind: 'clear', id: 'call' }); return; }
   try { const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration()); if (reg) (await reg.getNotifications({ tag: 'call' })).forEach((n) => n.close()); } catch {}
 }
-if (navigator.serviceWorker) navigator.serviceWorker.addEventListener('message', (e) => {
-  const d = e.data || {};
-  if (d.type === 'pushchange') { if (settings.get().push) setPush(true, true); return; }
-  if (d.type !== 'notification' || !calls) return;
-  if (d.data && d.data.kind === 'message' && d.data.chatId && app) { openChat(d.data.chatId); return; }
-  if (d.action === 'accept' && calls.state === 'incoming') { tones.ensure(); calls.accept(); }
-  else if (d.action === 'decline' && calls.state === 'incoming') calls.decline();
-});
+// Actions taken on a notification (service worker, Web Push, or the iOS shell's banners):
+// inline Reply text, open the chat, Answer / Decline an incoming call. If the app is not
+// started yet (notification opened the app), the action waits until it is.
+function onNotificationAction(action, data = {}, text = '') {
+  if (!app || !app.ready || !calls) {
+    const until = Date.now() + 90000;
+    const t = setInterval(() => { if (app && app.ready && calls) { clearInterval(t); onNotificationAction(action, data, text); } else if (Date.now() > until) clearInterval(t); }, 500);
+    return;
+  }
+  if (action === 'reply') {
+    const msg = (text || '').trim().slice(0, 4000);
+    if (msg && data.chatId && app.canChat(data.chatId)) app.sendMessage(data.chatId, { text: msg }).catch((e) => toast(e.message || 'Could not send', 'error'));
+    return;
+  }
+  if (action === 'accept' && calls.state === 'incoming') { tones.ensure(); calls.accept(); return; }
+  if (action === 'decline' && calls.state === 'incoming') { calls.decline(); return; }
+  if (data.kind === 'message' && data.chatId) openChat(data.chatId);
+}
+if (navigator.serviceWorker) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    const d = e.data || {};
+    if (d.type === 'pushchange') { if (settings.get().push) setPush(true, true); return; }
+    if (d.type === 'notification') onNotificationAction(d.action, d.data || {}, d.reply || '');
+  });
+  if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'pending' });
+}
+window.addEventListener('chatly:notification', (e) => { const d = e.detail || {}; onNotificationAction(d.action, { kind: d.kind, chatId: d.chatId }, d.text || ''); });
 document.addEventListener('pointerdown', () => tones.ensure(), { once: true });
 
 function wireCalls() {
