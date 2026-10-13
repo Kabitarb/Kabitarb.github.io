@@ -16,12 +16,21 @@
       "iconURL": "https://kabitarb.github.io/livetranslate/icon.png",
       "tintColor": "#0A84FF",
       "category": "utilities",
-      "version": "2.1",
+      "version": "2.2",
       "versionDate": "2026-10-13",
-      "versionDescription": "In-app updates: the app tells you when a new version is out and opens it in Feather with one tap.",
-      "downloadURL": "https://kabitarb.github.io/livetranslate/LiveTranslate-2.1.ipa",
-      "size": 571389,
+      "versionDescription": "Floating window shows text only again (translated + English kept, in reading order). New Text tab to type or paste. Arabic dialect auto-detect (Gulf/UAE, Egyptian, Levantine/Jordan, Iraqi, Maghrebi) with dialect-aware translation. Faster translation. Fixes: crash when no microphone is available; clearer messages.",
+      "downloadURL": "https://kabitarb.github.io/livetranslate/LiveTranslate-2.2.ipa",
+      "size": 630167,
       "versions": [
+        {
+          "version": "2.2",
+          "buildVersion": "4",
+          "date": "2026-10-13",
+          "localizedDescription": "Floating window shows text only again (translated + English kept, in reading order). New Text tab to type or paste. Arabic dialect auto-detect (Gulf/UAE, Egyptian, Levantine/Jordan, Iraqi, Maghrebi) with dialect-aware translation. Faster translation. Fixes: crash when no microphone is available; clearer messages.",
+          "downloadURL": "https://kabitarb.github.io/livetranslate/LiveTranslate-2.2.ipa",
+          "size": 630167,
+          "minOSVersion": "18.0"
+        },
         {
           "version": "2.1",
           "buildVersion": "3",
@@ -32,7 +41,10 @@
           "minOSVersion": "18.0"
         }
       ],
-      "appPermissions": { "entitlements": [], "privacy": {} }
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      }
     }
   ],
   "news": []
