@@ -7,7 +7,8 @@ export const isGroupId = (id) => typeof id === 'string' && id.startsWith('g:');
 export const gidOf = (id) => id.slice(2);
 const MAX_GROUP = 16;
 const CHUNK = 30000;            // chars of base64 per relay event (fits the ~48 KB payload limit)
-const MAX_VIDEO = 1600000;      // data-URL chars, ~1.2 MB of video
+const MAX_VIDEO = 1600000;
+const okAv = (v) => typeof v === 'string' && v.length < 60000 && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v);      // data-URL chars, ~1.2 MB of video
 const PRESENCE_EVERY = 50000;
 const BG_PRESENCE_MS = 10 * 60 * 1000;   // keep showing as online this long after the app is minimized
 // Short fingerprint of a name + photo so friends can tell when theirs is stale.
@@ -42,6 +43,7 @@ export class App extends EventTarget {
     this.shareHandler = null;
     this.lastResume = 0;
     this.pendingGroup = {};   // gid -> rumors that arrived before the group sync
+    this.pendingGroupCtl = {}; // gid -> chat controls (poll/pin/...) that arrived before the group sync
     this.ready = false;
     this.presence = {};       // pk -> last heartbeat ms (not persisted)
     this.profileAsked = {};   // pk -> last time we asked them to re-send their profile
@@ -571,6 +573,11 @@ export class App extends EventTarget {
       }
       case 'edit': case 'del': case 'pin': case 'expire': case 'poll': case 'vote': {
         const chatId = this.chatIdFor(from, c);
+        if (c.g && !this.state.groups[c.g] && /^[0-9a-f]{16}$/.test(c.g)) {
+          const q = this.pendingGroupCtl[c.g] || (this.pendingGroupCtl[c.g] = []);
+          if (q.length < 100) q.push({ from, c, rumor });
+          return;
+        }
         if (c.g ? !this.inGroup(c.g, from) : !this.isFriend(from)) return;
         this.applyChatControl(chatId, from, c, rumor);
         break;
@@ -604,7 +611,7 @@ export class App extends EventTarget {
       const before = new Set(g.members);
       // Snapshots can arrive in any order (relays, second device): name/admin are
       // last-writer-wins by ts, members are a union minus anyone who left later.
-      if (newer) { g.name = String(c.n || g.name || 'Group').slice(0, 40); g.ts = c.ts || Date.now(); if (typeof c.av === 'string' && (c.av === '' || (c.av.startsWith('data:image/') && c.av.length < 60000))) { if (c.av !== (g.av || '') && existing && from !== this.pk) this.systemMessage('g:' + gid, `${this.nameOf(from)} changed the group photo`, rumor.created_at * 1000); if (c.av) g.av = c.av; else delete g.av; } if (c.admin && /^[0-9a-f]{64}$/.test(c.admin)) g.admin = c.admin; }
+      if (newer) { g.name = String(c.n || g.name || 'Group').slice(0, 40); g.ts = c.ts || Date.now(); if (typeof c.av === 'string' && (c.av === '' || okAv(c.av))) { if (c.av !== (g.av || '') && existing && from !== this.pk) this.systemMessage('g:' + gid, `${this.nameOf(from)} changed the group photo`, rumor.created_at * 1000); if (c.av) g.av = c.av; else delete g.av; } if (c.admin && /^[0-9a-f]{64}$/.test(c.admin)) g.admin = c.admin; }
       else if (!g.name) g.name = String(c.n || 'Group').slice(0, 40);
       const snapTs = c.ts || 0;
       for (const p of c.m) if (!g.members.includes(p) && !((g.left[p] || 0) > snapTs)) g.members.push(p);
@@ -618,6 +625,8 @@ export class App extends EventTarget {
         if (newer && c.n && existing.name && c.n !== existing.name && from !== this.pk) this.systemMessage('g:' + gid, `${this.nameOf(from)} renamed the group to “${g.name}”`, rumor.created_at * 1000);
       }
       const q = this.pendingGroup[gid]; delete this.pendingGroup[gid];
+      const cq = this.pendingGroupCtl[gid]; delete this.pendingGroupCtl[gid];
+      if (cq) queueMicrotask(() => { for (const e of cq) { try { if (this.inGroup(gid, e.from)) this.applyChatControl('g:' + gid, e.from, e.c, e.rumor); } catch {} } });
       if (q) for (const r of q) this.handleRumor(r);
       this.emit('group', { gid });
     } else if (c.op === 'leave') {
@@ -753,7 +762,7 @@ export class App extends EventTarget {
       meta = { n: parts.length, mime: video.mime, dur: video.dur, w: video.w, h: video.h, size: video.data.length, poster: video.poster || '' };
     }
     if (audio) {
-      if (audio.data.length > MAX_VIDEO / 2) throw new Error('Voice message is too long');
+      if (audio.data.length > MAX_VIDEO) throw new Error('Voice message is too long');
       for (let i = 0; i < audio.data.length; i += CHUNK) parts.push(audio.data.slice(i, i + CHUNK));
       meta = { n: parts.length, mime: audio.mime, dur: audio.dur, size: audio.data.length, wave: audio.wave || [] };
     }
@@ -1014,7 +1023,7 @@ export class App extends EventTarget {
   backupSnapshot() {
     const friends = {}, groups = {};
     for (const [pk, f] of Object.entries(this.state.friends)) if (['friend', 'pending', 'blocked', 'request'].includes(f.status)) friends[pk] = { n: f.name || '', s: f.status, t: f.since || 0 };
-    for (const [gid, g] of Object.entries(this.state.groups)) if (g.members.includes(this.pk)) groups[gid] = { n: g.name, m: g.members, a: g.admin, t: g.since || 0, ts: g.ts || 0 };
+    for (const [gid, g] of Object.entries(this.state.groups)) if (g.members.includes(this.pk)) groups[gid] = { n: g.name, m: g.members, a: g.admin, t: g.since || 0, ts: g.ts || 0, av: okAv(g.av) ? g.av : '' };
     const p = this.state.profile;
     return { v: 1, profile: { name: p.name || '', username: p.username || '', re: p.recoveryEmail || '', av: p.avatar || '', ts: p.ts || 0 }, friends, groups };
   }
@@ -1052,9 +1061,12 @@ export class App extends EventTarget {
       if (!Array.isArray(r.m) || !r.m.includes(this.pk)) continue;
       const members = r.m.filter((p) => /^[0-9a-f]{64}$/.test(p)).slice(0, MAX_GROUP);
       this.state.groups[gid] = { name: String(r.n || 'Group').slice(0, 40), members, admin: r.a, since: Number(r.t) || Date.now(), ts: Number(r.ts) || 0, left: {} };
+      if (okAv(r.av)) this.state.groups[gid].av = r.av;
       this.store.chat('g:' + gid);
       for (const p of members) if (p !== this.pk && !this.state.friends[p]) { this.state.friends[p] = { name: '', status: 'contact', since: Date.now() }; added.push(p); }
       const q = this.pendingGroup[gid]; delete this.pendingGroup[gid];
+      const cq = this.pendingGroupCtl[gid]; delete this.pendingGroupCtl[gid];
+      if (cq) queueMicrotask(() => { for (const e of cq) { try { if (this.inGroup(gid, e.from)) this.applyChatControl('g:' + gid, e.from, e.c, e.rumor); } catch {} } });
       if (q) for (const rr of q) this.handleRumor(rr);
     }
     const p = this.state.profile;

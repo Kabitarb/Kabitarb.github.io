@@ -79,7 +79,7 @@ const COLORS = ['#2d8cff', '#8b5cf6', '#22c55e', '#ec4899', '#f97316', '#14b8a6'
 function colorOf(id) { let h = 0; const s = String(id || ''); for (let i = 0; i < Math.min(16, s.length); i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return COLORS[h % COLORS.length]; }
 function initials(name) { const p = (name || '?').trim().split(/\s+/); return ((p[0][0] || '') + (p[1] ? p[1][0] : '')).toUpperCase(); }
 function avatarInner(id, name = '') {
-  if (isGroupId(id)) { const g = app && app.group(id); return g && g.av ? `<img src="${g.av}" alt="">` : GROUP_SVG; }
+  if (isGroupId(id)) { const g = app && app.group(id); return g && g.av && /^data:image\/[a-z]+;base64,[A-Za-z0-9+/=]+$/.test(g.av) ? `<img src="${g.av}" alt="">` : GROUP_SVG; }
   const av = app ? app.avatarOf(id) : '';
   const known = app && (app.isFriend(id) || id === app.pk);
   return av ? `<img src="${av}" alt="">` : esc(initials(name && !known ? name : app ? app.nameOf(id) : '?'));
@@ -786,7 +786,7 @@ function renderSettings() {
       ${['small', 'normal', 'large', 'xl'].map((t) => `<button class="theme-opt ${(s.font || 'normal') === t ? 'active' : ''}" data-font="${t}">${{ small: 'Small', normal: 'Default', large: 'Large', xl: 'Extra large' }[t]}</button>`).join('')}</div></div></div>
     <h4>Privacy</h4>
     <div class="card">
-      <div class="srow clickable" id="s-lock"><div><div>App lock</div><div class="tiny muted">${lock.enabled() ? `PIN${lock.bio() ? ' + Face ID / Touch ID' : ''} · locks after ${lock.afterLabel()}` : 'Ask for a PIN (or Face ID / Touch ID) when Chatly opens'}</div></div><span class="muted">${lock.enabled() ? 'On' : 'Off'} ›</span></div>
+      <div class="srow clickable" id="s-lock"><div><div>App lock</div><div class="tiny muted">${lock.enabled() ? `PIN${lock.bio() ? ' + Face ID / Touch ID' : ''} · locks after ${lock.afterLabel()}` : 'Ask for a PIN (or Face ID / Touch ID) when Chatly opens'}. Screen lock only — stops casual snooping on an unlocked device; log out for full protection.</div></div><span class="muted">${lock.enabled() ? 'On' : 'Off'} ›</span></div>
       <div class="srow clickable" id="s-starred"><div><div>Starred messages</div><div class="tiny muted">${app.starred().length} starred</div></div><span class="muted">›</span></div>
       <div class="srow clickable" id="s-export"><div><div>Export chats</div><div class="tiny muted">Encrypted file (needs a passphrase) you can import on another device.</div></div><span class="muted">›</span></div>
       <div class="srow clickable" id="s-import"><div><div>Import chats</div><div class="tiny muted">Restore from a Chatly export file.</div></div><span class="muted">›</span></div>
@@ -1617,7 +1617,7 @@ input.addEventListener('input', () => { $('composer').classList.toggle('has-text
 (function voiceRecorder() {
   const mic = $('mic-btn'); const bar = $('rec-bar'); const wave = $('rec-wave');
   let rec = null, stream = null, chunks = [], t0 = 0, timer = null, levels = [], cancel = false, sx = 0, ctx = null, an = null, raf = 0, active = false, pid = null;
-  const MAX_SEC = 180;
+  const MAX_SEC = 180; const MAX_REC_BYTES = 1000000; // base64 of this stays under the relay media cap
   const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', ''].find((m) => !m || (window.MediaRecorder && MediaRecorder.isTypeSupported(m)));
   mic.addEventListener('contextmenu', (e) => e.preventDefault());
   const draw = () => {
@@ -1639,8 +1639,10 @@ input.addEventListener('input', () => { $('composer').classList.toggle('has-text
     try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { active = false; toast('Microphone permission denied', 'error'); return; }
     if (!active) { stream.getTracks().forEach((t) => t.stop()); return; }
     try { mic.setPointerCapture(pid); } catch {}
-    rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined);
-    rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 24000 } : undefined);
+    let bytes = 0;
+    rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) { chunks.push(ev.data); bytes += ev.data.size; if (bytes > MAX_REC_BYTES && rec === r0) stop(false); } };
+    const r0 = rec;
     rec.start(250); t0 = Date.now();
     ctx = new (window.AudioContext || window.webkitAudioContext)(); an = ctx.createAnalyser(); an.fftSize = 512; ctx.createMediaStreamSource(stream).connect(an);
     wave.innerHTML = ''; $('rec-time').textContent = '0:00'; bar.classList.remove('hidden', 'cancel'); $('rec-hint').textContent = '‹ Slide to cancel';
@@ -2714,8 +2716,8 @@ async function exportCipher(pass) {
   return localCipher(sk);
 }
 async function exportChats() {
-  const pass = await promptSheet('Export passphrase', '', 'Choose a passphrase', 'Needed to import this file. It is not your account password.');
-  if (!pass) return; if (pass.length < 6) { toast('Use at least 6 characters', 'error'); return; }
+  const pass = await promptSheet('Export passphrase', '', 'Choose a passphrase (10+ characters)', 'Needed to import this file. It is not your account password; pick a long one — the file can be attacked offline.');
+  if (!pass) return; if (pass.length < 10) { toast('Use at least 10 characters — anyone with the file can try to guess a short passphrase', 'error'); return; }
   toast('Preparing export…');
   try {
     const blobs = {};
@@ -2741,13 +2743,22 @@ function importChats() {
       if (data.pk && data.pk !== app.pk && !await confirmSheet('Different account', 'This export is from another account. Import its chats anyway?', 'Import', false)) return;
       let added = 0;
       for (const [cid, chat] of Object.entries(data.chats)) {
-        const mine = app.store.chat(cid); const have = new Set(mine.messages.map((m) => m.id));
-        for (const m of chat.messages || []) if (!have.has(m.id)) { mine.messages.push(m); added++; }
+        const mine = app.store.chat(cid); const have = new Map(mine.messages.map((m) => [m.id, m]));
+        for (const m of chat.messages || []) {
+          const cur = have.get(m.id);
+          if (!cur) { mine.messages.push(m); added++; continue; }
+          if (m.deleted && !cur.deleted) app.tombstone(cur);
+          else if (!cur.deleted && m.edited && (m.editTs || 0) > (cur.editTs || 0)) { cur.text = m.text; cur.edited = true; cur.editTs = m.editTs; }
+          if (m.star) cur.star = true;
+          for (const k of ['votes', 'rx']) if (m[k]) for (const [pk, v] of Object.entries(m[k])) { const o = cur[k] && cur[k][pk]; if (o === undefined || ((v && v.ts) || 0) > ((o && o.ts) || 0)) (cur[k] = cur[k] || {})[pk] = v; }
+        }
         mine.messages.sort((a, b) => a.ts - b.ts); mine.lastTs = Math.max(mine.lastTs || 0, chat.lastTs || 0);
         for (const k of ['pin', 'mute', 'arch', 'expire', 'wall', 'bubble', 'pinned']) if (chat[k] !== undefined && mine[k] === undefined) mine[k] = chat[k];
       }
-      for (const [pk, fr] of Object.entries(data.friends || {})) if (!app.state.friends[pk]) app.state.friends[pk] = fr;
-      for (const [gid, g] of Object.entries(data.groups || {})) if (!app.state.groups[gid]) app.state.groups[gid] = g;
+      if (data.pk === app.pk) {
+        for (const [pk, fr] of Object.entries(data.friends || {})) if (!app.state.friends[pk]) app.state.friends[pk] = fr;
+        for (const [gid, g] of Object.entries(data.groups || {})) if (!app.state.groups[gid]) app.state.groups[gid] = g;
+      }
       for (const [id, d] of Object.entries(data.blobs || {})) await store.putBlob(id, d);
       store.save(); renderedFor = null; scheduleRender(); if (app.openChat) renderChat();
       toast(`Imported ${added} message${added === 1 ? '' : 's'}`);
