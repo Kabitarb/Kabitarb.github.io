@@ -1279,3 +1279,7 @@ button, .icon-btn { -webkit-touch-callout: none; }
 #toasts { top: calc(64px + var(--safe-top)); }
 @media (max-width: 859px) { #toasts { top: auto; bottom: calc(96px + var(--safe-bottom)); } .toast { animation: toastup .45s var(--spring); } }
 @keyframes toastup { from { opacity: 0; transform: translateY(16px) scale(.95) } }
+/* fixes from recorded v9 pass */
+.dots-wrap { width: min(92vw, 56dvh, 520px); max-width: 100%; }
+.dots { height: auto; aspect-ratio: 1 / 1; display: block; }
+#game.mini .game-mini-bar .btn { background: rgba(255,255,255,.2); border: 1px solid rgba(255,255,255,.45); color: #fff; }
