@@ -20,6 +20,8 @@
   h2 { font-size: 19px; margin-top: 30px; }
   ol { padding-left: 22px; } li { margin: 6px 0; }
   #notes { white-space: pre-line; }
+  .hint { font-size: 15px; opacity: .8; margin: 4px 2px 14px; }
+  .err { color: #d70015; margin: 10px 0; }
 </style>
 </head>
 <body>
@@ -28,9 +30,11 @@
   <div><h1>Live Translate</h1><div class="ver" id="ver">Loading…</div></div>
 </header>
 
-<a class="btn primary" id="feather-source" href="#">Add source to Feather</a>
-<a class="btn secondary" id="feather-install" href="#">Install latest in Feather</a>
-<a class="btn secondary" id="ipa" href="#">Download .ipa (ESign / Scarlet / Sideloadly)</a>
+<a class="btn primary" id="feather-source" href="#">1. Add source to Feather</a>
+<p class="hint">2. In Feather open <b>Sources › Live Translate</b> and install from there, so Feather shows an Update button for new versions.</p>
+<div id="err" class="err" hidden>Couldn't load the latest version. <button class="btn secondary" id="retry">Try again</button></div>
+<a class="btn secondary" id="feather-install" hidden>Install once in Feather without updates</a>
+<a class="btn secondary" id="ipa" hidden>Download .ipa (ESign / Scarlet / Sideloadly)</a>
 
 <h2>Source link (ESign, Scarlet, AltStore)</h2>
 <code id="src"></code>
@@ -41,7 +45,7 @@
 
 <h2>How updates work</h2>
 <ol>
-  <li>Add the source once (Feather: top button; ESign / Scarlet: paste the source link in Sources).</li>
+  <li>Add the source once (Feather: the blue button; ESign / Scarlet: paste the source link in Sources).</li>
   <li>Install Live Translate <b>from the source</b> so your signer can track it.</li>
   <li>When a new version is posted, the app shows <b>Update available</b> and your signer shows an Update button. Your settings are kept.</li>
 </ol>
@@ -53,14 +57,25 @@
   document.getElementById("copy").onclick = async () => {
     try { await navigator.clipboard.writeText(SRC); document.getElementById("copy").textContent = "Copied"; } catch (e) {}
   };
-  fetch(SRC, { cache: "no-store" }).then(r => r.json()).then(s => {
-    const app = s.apps[0], v = (app.versions && app.versions[0]) || app;
-    const ipa = new URL(v.downloadURL, location.href).href;
-    document.getElementById("ver").textContent = "Version " + v.version + " · " + (v.date || "");
-    document.getElementById("notes").textContent = v.localizedDescription || "";
-    document.getElementById("ipa").href = ipa;
-    document.getElementById("feather-install").href = "feather://install/" + ipa;
-  });
+  const ver = document.getElementById("ver"), err = document.getElementById("err");
+  function load() {
+    err.hidden = true;
+    ver.textContent = "Loading…";
+    fetch(SRC, { cache: "no-store" })
+      .then(r => { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(s => {
+        const app = s.apps[0], v = (app.versions && app.versions[0]) || app;
+        const ipa = new URL(v.downloadURL, location.href).href;
+        ver.textContent = "Version " + v.version + " · " + (v.date || "");
+        document.getElementById("notes").textContent = v.localizedDescription || "";
+        const dl = document.getElementById("ipa"), fi = document.getElementById("feather-install");
+        dl.href = ipa; fi.href = "feather://install/" + ipa;
+        dl.hidden = false; fi.hidden = false;
+      })
+      .catch(() => { ver.textContent = ""; err.hidden = false; });
+  }
+  document.getElementById("retry").onclick = load;
+  load();
 </script>
 </body>
 </html>
