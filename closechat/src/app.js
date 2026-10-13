@@ -1,6 +1,6 @@
 import {
   pubkeyOf, createRumor, wrapFor, unwrap, directoryEvent, backupEvent, openBackup, backupTag,
-  KIND_TEXT, KIND_IMAGE, KIND_STICKER, KIND_VIDEO, KIND_CHUNK, KIND_CONTROL, WRAP_KIND,
+  KIND_TEXT, KIND_IMAGE, KIND_STICKER, KIND_VIDEO, KIND_AUDIO, KIND_CHUNK, KIND_CONTROL, WRAP_KIND,
 } from './crypto.js';
 
 export const isGroupId = (id) => typeof id === 'string' && id.startsWith('g:');
@@ -18,7 +18,10 @@ export function profileFp(name, avatar) {
   return h.toString(16) + str.length.toString(36);
 }
 const ONLINE_WINDOW = 125000;
-const isMessageKind = (k) => k === KIND_TEXT || k === KIND_IMAGE || k === KIND_STICKER || k === KIND_VIDEO;
+const isMessageKind = (k) => k === KIND_TEXT || k === KIND_IMAGE || k === KIND_STICKER || k === KIND_VIDEO || k === KIND_AUDIO;
+const HEX64 = /^[0-9a-f]{64}$/;
+export const EXPIRE_OPTIONS = [0, 86400, 7 * 86400, 90 * 86400];
+const bytesToHexSafe = (u8) => Array.from(u8, (b) => b.toString(16).padStart(2, '0')).join('');
 
 // Core protocol layer: turns decrypted rumors into state changes and state
 // changes into encrypted gift wraps. A "chat id" is either a friend's pubkey
@@ -65,7 +68,7 @@ export class App extends EventTarget {
     this.watchdog = setInterval(() => { if (this.visible && this.ready && this.transport.connected === 0) this.resume(); }, 15000);
   }
 
-  stop() { clearInterval(this.presenceTimer); clearTimeout(this.backupTimer); clearInterval(this.watchdog); }
+  stop() { clearInterval(this.presenceTimer); clearInterval(this.sweepTimer); clearTimeout(this.backupTimer); clearInterval(this.watchdog); }
 
   // Called when the app comes back to the foreground / network returns: reopen
   // dead relay sockets and re-subscribe so nothing sent while we were frozen is missed.
@@ -136,7 +139,7 @@ export class App extends EventTarget {
     const ms = this.tag(rumor, 'ms');
     const g = this.tag(rumor, 'g');
     const re = rumor.tags.find((t) => t[0] === 're');
-    const kind = rumor.kind === KIND_IMAGE ? 'image' : rumor.kind === KIND_STICKER ? 'sticker' : rumor.kind === KIND_VIDEO ? 'video' : 'text';
+    const kind = rumor.kind === KIND_IMAGE ? 'image' : rumor.kind === KIND_STICKER ? 'sticker' : rumor.kind === KIND_VIDEO ? 'video' : rumor.kind === KIND_AUDIO ? 'audio' : 'text';
     const m = {
       id: rumor.id, from: rumor.pubkey, to: this.tag(rumor, 'p'), kind,
       text: kind === 'text' ? rumor.content : '',
@@ -149,6 +152,15 @@ export class App extends EventTarget {
       m.video = { n: Math.min(200, Number(v.n) || 0), mime: String(v.mime || 'video/mp4').slice(0, 40), dur: Number(v.dur) || 0, w: Number(v.w) || 0, h: Number(v.h) || 0, size: Number(v.size) || 0, poster: typeof v.poster === 'string' && v.poster.length < 12000 ? v.poster : '' };
       m.text = '';
     }
+    if (kind === 'audio') {
+      let v = {}; try { v = JSON.parse(rumor.content) || {}; } catch {}
+      m.audio = { n: Math.min(200, Number(v.n) || 0), mime: String(v.mime || 'audio/webm').slice(0, 40), dur: Number(v.dur) || 0, size: Number(v.size) || 0, wave: Array.isArray(v.wave) ? v.wave.slice(0, 64).map((x) => Math.max(0, Math.min(1, Number(x) || 0))) : [], ready: false, got: 0 };
+      m.text = '';
+    }
+    const exp = Number(this.tag(rumor, 'exp')) || 0; if (exp > 0) m.exp = Math.min(exp, 365 * 86400);
+    if (rumor.tags.some((t) => t[0] === 'fwd')) m.fwd = true;
+    const fx = this.tag(rumor, 'fx'); if (fx && /^[a-z]{2,12}$/.test(fx)) m.fx = fx;
+    const mt = rumor.tags.filter((t) => t[0] === 'mt' && HEX64.test(t[1] || '')).map((t) => t[1]); if (mt.length) m.mt = mt.slice(0, 16);
     if (g) m.g = g;
     if (re) m.re = { id: re[1], from: re[2] || '', text: re[3] || '' };
     return m;
@@ -175,7 +187,7 @@ export class App extends EventTarget {
     if (chat.messages.some((x) => x.id === m.id)) return;
     m.status = 'received';
     this.insertMessage(chat, m);
-    if (m.kind === 'video') this.assembleVideo(m.id);
+    if (m.video || m.audio) this.assembleVideo(m.id);
     const onScreen = this.openChat === m.from && this.visible;
     if (onScreen && this.isFriend(m.from)) {
       m.acked = 'read';
@@ -208,7 +220,7 @@ export class App extends EventTarget {
     if (chat.messages.some((x) => x.id === m.id)) return;
     m.status = m.from === this.pk ? 'sent' : 'received';
     this.insertMessage(chat, m);
-    if (m.kind === 'video') this.assembleVideo(m.id);
+    if (m.video || m.audio) this.assembleVideo(m.id);
     if (m.from === this.pk) return;
     this.touch(m.from);
     const onScreen = this.openChat === chatId && this.visible;
@@ -219,6 +231,8 @@ export class App extends EventTarget {
 
   insertMessage(chat, m) {
     chat.messages.push(m);
+    const cq = this._ctlQ && this._ctlQ[m.id];
+    if (cq) { delete this._ctlQ[m.id]; queueMicrotask(() => { for (const e of cq) { try { this.applyChatControl(e.chatId, e.from, e.c, e.rumor); } catch {} } }); }
     chat.messages.sort((a, b) => a.ts - b.ts);
     if (m.ts > chat.lastTs) chat.lastTs = m.ts;
     if (chat.messages.length > 2000) chat.messages.splice(0, chat.messages.length - 2000);
@@ -257,6 +271,15 @@ export class App extends EventTarget {
     } else if (c.t === 'react') {
       const chatId = c.g ? 'g:' + c.g : to;
       if (chatId && chatId !== this.pk) this.applyReaction(chatId, this.pk, c, this.rxTs(c, rumor));
+    } else if (['edit', 'del', 'pin', 'expire', 'poll', 'vote'].includes(c.t)) {
+      const chatId = c.g ? 'g:' + c.g : to;
+      if (chatId && chatId !== this.pk) this.applyChatControl(chatId, this.pk, c, rumor);
+    } else if (c.t === 'star' && HEX64.test(String(c.id || ''))) {
+      const hit = this.findMessage(c.id); if (hit) { if (c.on) hit.m.star = true; else delete hit.m.star; this.emit('message-changed', { chatId: hit.chatId, mid: c.id }); }
+    } else if (c.t === 'chatflag' && typeof c.id === 'string' && (HEX64.test(c.id) || /^g:[0-9a-f]{16}$/.test(c.id))) {
+      const chat = this.store.chat(c.id);
+      for (const k of ['pin', 'mute', 'arch', 'markUnread']) if (c[k] !== undefined) { if (c[k]) chat[k] = true; else delete chat[k]; }
+      this.emit('chatflag', { chatId: c.id });
     } else if (c.t === 'calllog' && c.e && typeof c.e === 'object' && /^[0-9a-f]{64}$/.test(c.e.peer || '')) {
       const e = c.e;
       this.logCall({ id: String(e.id || rumor.id).slice(0, 64), peer: e.peer, dir: e.dir === 'out' ? 'out' : 'in', video: !!e.video, ts: Number(e.ts) || rumor.created_at * 1000, dur: Number(e.dur) || 0, missed: !!e.missed, reason: String(e.reason || '').slice(0, 20) }, true);
@@ -308,6 +331,141 @@ export class App extends EventTarget {
     this.store.save();
     this.sendChatControl(chatId, { t: 'react', id: mid, e: next, ts }, false, true);
     return next;
+  }
+
+  /* ---------- edits, deletes, pins, disappearing, polls ---------- */
+  applyChatControl(chatId, from, c, rumor) {
+    const chat = this.store.chat(chatId);
+    const ts = rumor.created_at * 1000;
+    const mid = String(c.id || '');
+    if ((c.t === 'edit' || c.t === 'del' || c.t === 'vote') && HEX64.test(mid) && !chat.messages.some((x) => x.id === mid)) {
+      this._ctlQ = this._ctlQ || {}; const q = (this._ctlQ[mid] = this._ctlQ[mid] || []);
+      if (q.length < 20) q.push({ chatId, from, c, rumor });
+      return;
+    }
+    if (c.t === 'edit') {
+      const m = chat.messages.find((x) => x.id === mid); if (!m || m.from !== from || m.kind !== 'text' || m.deleted) return;
+      if (m.editTs && m.editTs > ts) return;
+      m.text = String(c.text || '').slice(0, 20000); m.editTs = ts; m.edited = true;
+      this.emit('message-changed', { chatId, mid, fresh: this.ready && from !== this.pk });
+    } else if (c.t === 'del') {
+      const m = chat.messages.find((x) => x.id === mid); if (!m || m.from !== from) return;
+      this.tombstone(m);
+      this.emit('message-changed', { chatId, mid, fresh: this.ready && from !== this.pk });
+    } else if (c.t === 'pin') {
+      if (!HEX64.test(mid)) return;
+      chat.pinned = (chat.pinned || []).filter((x) => x !== mid);
+      if (c.on) { chat.pinned.push(mid); chat.pinned = chat.pinned.slice(-3); }
+      if (!chat.pinned.length) delete chat.pinned;
+      this.sysMessage(chat, `${this.nameOrYou(from)} ${c.on ? 'pinned' : 'unpinned'} a message`, ts);
+      this.emit('message-changed', { chatId, mid });
+    } else if (c.t === 'expire') {
+      const sec = EXPIRE_OPTIONS.includes(Number(c.sec)) ? Number(c.sec) : 0;
+      if (chat.expireTs && chat.expireTs > ts) return;
+      chat.expire = sec || 0; chat.expireTs = ts; if (!sec) delete chat.expire;
+      this.sysMessage(chat, sec ? `${this.nameOrYou(from)} turned on disappearing messages (${this.expireLabel(sec)})` : `${this.nameOrYou(from)} turned off disappearing messages`, ts);
+      this.emit('message-changed', { chatId });
+    } else if (c.t === 'poll') {
+      if (!HEX64.test(mid) || chat.messages.some((x) => x.id === mid)) return;
+      const opts = Array.isArray(c.opts) ? c.opts.map((o) => String(o).slice(0, 60)).filter(Boolean).slice(0, 8) : [];
+      if (opts.length < 2) return;
+      const m = { id: mid, from, kind: 'poll', text: String(c.q || '').slice(0, 200), opts, votes: {}, ts: Number(c.ts) && Math.abs(c.ts - ts) < 120000 ? Number(c.ts) : ts, status: from === this.pk ? 'sent' : 'received' };
+      if (isGroupId(chatId)) m.g = gidOf(chatId);
+      this.insertMessage(chat, m);
+      if (from !== this.pk && !(this.openChat === chatId && this.visible)) chat.unread++;
+      this.emit('message', { pk: from, chatId, message: m, fresh: this.ready && from !== this.pk });
+    } else if (c.t === 'vote') {
+      const m = chat.messages.find((x) => x.id === mid); if (!m || m.kind !== 'poll') return;
+      m.votes = m.votes || {}; m.voteTs = m.voteTs || {};
+      if ((m.voteTs[from] || 0) > ts) return;
+      m.voteTs[from] = ts;
+      const i = Number(c.i);
+      if (i >= 0 && i < m.opts.length) m.votes[from] = i; else delete m.votes[from];
+      this.emit('message-changed', { chatId, mid });
+    }
+    this.store.save();
+  }
+  nameOrYou(pk) { return pk === this.pk ? 'You' : this.nameOf(pk); }
+  expireLabel(sec) { return sec >= 86400 * 30 ? Math.round(sec / 86400) + ' days' : sec >= 86400 ? Math.round(sec / 86400) + (sec >= 2 * 86400 ? ' days' : ' day') : Math.round(sec / 3600) + ' h'; }
+  sysMessage(chat, text, ts) {
+    const id = 'sys:' + (ts || Date.now()).toString(36) + ':' + Math.random().toString(36).slice(2, 8);
+    this.insertMessage(chat, { id, kind: 'system', text, ts: ts || Date.now(), from: '' });
+  }
+  tombstone(m) {
+    m.deleted = true; m.text = ''; m.img = ''; m.sticker = ''; delete m.rx; delete m.re; delete m.fx;
+    if (m.video || m.audio) { this.store.putBlob(m.id, '').catch(() => {}); delete this.store.blobs[m.id]; if (m.video) m.video = { n: 0, ready: false, deleted: true }; if (m.audio) m.audio = { n: 0, ready: false, deleted: true }; }
+    if (m.kind === 'poll') { m.opts = []; m.votes = {}; }
+  }
+  canEdit(m) { return m && m.from === this.pk && m.kind === 'text' && !m.deleted && Date.now() - m.ts < 15 * 60000; }
+  editMessage(chatId, mid, text) {
+    const chat = this.store.chat(chatId); const m = chat.messages.find((x) => x.id === mid);
+    if (!this.canEdit(m)) throw new Error('This message can no longer be edited');
+    text = String(text || '').trim().slice(0, 20000); if (!text || text === m.text) return;
+    m.text = text; m.edited = true; m.editTs = Date.now(); this.store.save();
+    this.emit('message-changed', { chatId, mid });
+    this.sendChatControl(chatId, { t: 'edit', id: mid, text }, false, true);
+  }
+  deleteForAll(chatId, mid) {
+    const chat = this.store.chat(chatId); const m = chat.messages.find((x) => x.id === mid);
+    if (!m || m.from !== this.pk) return;
+    this.tombstone(m); this.store.save();
+    this.emit('message-changed', { chatId, mid });
+    this.sendChatControl(chatId, { t: 'del', id: mid }, false, true);
+  }
+  pinMessage(chatId, mid, on) {
+    const chat = this.store.chat(chatId);
+    this.applyChatControl(chatId, this.pk, { t: 'pin', id: mid, on: !!on }, { created_at: Math.floor(Date.now() / 1000) });
+    this.sendChatControl(chatId, { t: 'pin', id: mid, on: !!on }, false, true);
+    return chat.pinned || [];
+  }
+  setExpire(chatId, sec) {
+    this.applyChatControl(chatId, this.pk, { t: 'expire', sec }, { created_at: Math.floor(Date.now() / 1000) });
+    this.sendChatControl(chatId, { t: 'expire', sec }, false, true);
+  }
+  createPoll(chatId, q, opts) {
+    const id = bytesToHexSafe(crypto.getRandomValues(new Uint8Array(32)));
+    const ts = Date.now();
+    this.applyChatControl(chatId, this.pk, { t: 'poll', id, q, opts, ts }, { created_at: Math.floor(ts / 1000) });
+    this.sendChatControl(chatId, { t: 'poll', id, q, opts, ts }, false, true);
+  }
+  vote(chatId, mid, i) {
+    this.applyChatControl(chatId, this.pk, { t: 'vote', id: mid, i }, { created_at: Math.floor(Date.now() / 1000) });
+    this.sendChatControl(chatId, { t: 'vote', id: mid, i }, false, true);
+  }
+  star(chatId, mid, on) {
+    const hit = this.findMessage(mid); if (!hit) return;
+    if (on) hit.m.star = true; else delete hit.m.star;
+    this.store.save();
+    this.syncToSelf({ t: 'star', id: mid, on: !!on });
+  }
+  starred() {
+    const out = [];
+    for (const [chatId, chat] of Object.entries(this.state.chats)) for (const m of chat.messages) if (m.star) out.push({ chatId, m });
+    return out.sort((a, b) => b.m.ts - a.m.ts);
+  }
+  setChatFlag(chatId, patch) {
+    const chat = this.store.chat(chatId);
+    for (const k of ['pin', 'mute', 'arch', 'markUnread']) if (patch[k] !== undefined) { if (patch[k]) chat[k] = true; else delete chat[k]; }
+    this.store.save();
+    this.syncToSelf(Object.assign({ t: 'chatflag', id: chatId }, patch));
+  }
+  // Disappearing messages: drop anything older than its timer on every device.
+  sweepExpired() {
+    const now = Date.now(); let changed = false;
+    for (const [chatId, chat] of Object.entries(this.state.chats)) {
+      const keep = chat.messages.filter((m) => !(m.exp && m.ts + m.exp * 1000 < now));
+      if (keep.length !== chat.messages.length) {
+        for (const m of chat.messages) if (!keep.includes(m) && (m.video || m.audio)) { this.store.putBlob(m.id, '').catch(() => {}); delete this.store.blobs[m.id]; }
+        chat.messages = keep; changed = true; this.emit('message-changed', { chatId });
+      }
+    }
+    if (changed) this.store.save();
+    return changed;
+  }
+  search(chatId, q) {
+    q = String(q || '').trim().toLowerCase(); if (!q) return [];
+    const chat = this.store.chat(chatId);
+    return chat.messages.filter((m) => m.kind === 'text' && !m.deleted && m.text.toLowerCase().includes(q)).map((m) => m.id);
   }
 
   handleControl(rumor) {
@@ -411,6 +569,12 @@ export class App extends EventTarget {
         this.applyReaction(chatId, from, c, this.rxTs(c, rumor));
         break;
       }
+      case 'edit': case 'del': case 'pin': case 'expire': case 'poll': case 'vote': {
+        const chatId = this.chatIdFor(from, c);
+        if (c.g ? !this.inGroup(c.g, from) : !this.isFriend(from)) return;
+        this.applyChatControl(chatId, from, c, rumor);
+        break;
+      }
       case 'share':
         if (!this.isFriend(from) || ageSec > 90) return;
         if (this.shareHandler) this.shareHandler(from, c, rumor);
@@ -440,7 +604,7 @@ export class App extends EventTarget {
       const before = new Set(g.members);
       // Snapshots can arrive in any order (relays, second device): name/admin are
       // last-writer-wins by ts, members are a union minus anyone who left later.
-      if (newer) { g.name = String(c.n || g.name || 'Group').slice(0, 40); g.ts = c.ts || Date.now(); if (c.admin && /^[0-9a-f]{64}$/.test(c.admin)) g.admin = c.admin; }
+      if (newer) { g.name = String(c.n || g.name || 'Group').slice(0, 40); g.ts = c.ts || Date.now(); if (typeof c.av === 'string' && (c.av === '' || (c.av.startsWith('data:image/') && c.av.length < 60000))) { if (c.av !== (g.av || '') && existing && from !== this.pk) this.systemMessage('g:' + gid, `${this.nameOf(from)} changed the group photo`, rumor.created_at * 1000); if (c.av) g.av = c.av; else delete g.av; } if (c.admin && /^[0-9a-f]{64}$/.test(c.admin)) g.admin = c.admin; }
       else if (!g.name) g.name = String(c.n || 'Group').slice(0, 40);
       const snapTs = c.ts || 0;
       for (const p of c.m) if (!g.members.includes(p) && !((g.left[p] || 0) > snapTs)) g.members.push(p);
@@ -478,7 +642,7 @@ export class App extends EventTarget {
   groupSnapshot(gid) {
     const g = this.state.groups[gid];
     const names = {}; for (const p of g.members) names[p] = p === this.pk ? this.state.profile.name : this.nameOf(p);
-    return { t: 'group', op: 'sync', g: gid, n: g.name, m: g.members, admin: g.admin, ts: g.ts, names };
+    return { t: 'group', op: 'sync', g: gid, n: g.name, m: g.members, admin: g.admin, ts: g.ts, names, av: g.av || '' };
   }
 
   async broadcastGroupSync(gid) {
@@ -503,6 +667,13 @@ export class App extends EventTarget {
     if (!added.length) return;
     g.members = [...g.members, ...added].slice(0, MAX_GROUP); g.ts = Date.now();
     this.systemMessage('g:' + gid, `You added ${added.map((p) => this.nameOf(p)).join(', ')}`);
+    this.store.save();
+    this.broadcastGroupSync(gid);
+  }
+  setGroupPhoto(gid, av) {
+    const g = this.state.groups[gid]; if (!g) return;
+    if (av) g.av = av; else delete g.av; g.ts = Date.now();
+    this.systemMessage('g:' + gid, av ? 'You changed the group photo' : 'You removed the group photo');
     this.store.save();
     this.broadcastGroupSync(gid);
   }
@@ -564,22 +735,33 @@ export class App extends EventTarget {
     this.publishRumor(this.pk, rumor).catch((e) => console.warn('self sync failed', e.message));
   }
 
-  async sendMessage(chatId, { text, img, sticker, video, replyTo }) {
-    const kind = video ? KIND_VIDEO : img ? KIND_IMAGE : sticker ? KIND_STICKER : KIND_TEXT;
+  async sendMessage(chatId, { text, img, sticker, video, audio, replyTo, fwd, fx, mentions }) {
+    const kind = audio ? KIND_AUDIO : video ? KIND_VIDEO : img ? KIND_IMAGE : sticker ? KIND_STICKER : KIND_TEXT;
     const ts = Date.now();
     const tags = [['ms', String(ts)]];
     const group = isGroupId(chatId);
     if (group) tags.push(['g', gidOf(chatId)]); else tags.push(['p', chatId]);
     if (replyTo) tags.push(['re', replyTo.id, replyTo.from || '', String(replyTo.text || '').slice(0, 120)]);
+    const exp = Number(this.store.chat(chatId).expire) || 0; if (exp) tags.push(['exp', String(exp)]);
+    if (fwd) tags.push(['fwd']);
+    if (fx) tags.push(['fx', fx]);
+    (mentions || []).filter((p) => HEX64.test(p)).slice(0, 16).forEach((p) => tags.push(['mt', p]));
     let meta = null, parts = [];
     if (video) {
       if (video.data.length > MAX_VIDEO) throw new Error('Video is too large after compression');
       for (let i = 0; i < video.data.length; i += CHUNK) parts.push(video.data.slice(i, i + CHUNK));
       meta = { n: parts.length, mime: video.mime, dur: video.dur, w: video.w, h: video.h, size: video.data.length, poster: video.poster || '' };
     }
-    const rumor = createRumor(this.sk, kind, video ? JSON.stringify(meta) : img || sticker || text, tags);
-    const m = { id: rumor.id, from: this.pk, to: group ? '' : chatId, kind: video ? 'video' : img ? 'image' : sticker ? 'sticker' : 'text', text: text || '', img: img || '', sticker: sticker || '', ts, status: 'pending' };
+    if (audio) {
+      if (audio.data.length > MAX_VIDEO / 2) throw new Error('Voice message is too long');
+      for (let i = 0; i < audio.data.length; i += CHUNK) parts.push(audio.data.slice(i, i + CHUNK));
+      meta = { n: parts.length, mime: audio.mime, dur: audio.dur, size: audio.data.length, wave: audio.wave || [] };
+    }
+    const rumor = createRumor(this.sk, kind, meta ? JSON.stringify(meta) : img || sticker || text, tags);
+    const m = { id: rumor.id, from: this.pk, to: group ? '' : chatId, kind: audio ? 'audio' : video ? 'video' : img ? 'image' : sticker ? 'sticker' : 'text', text: text || '', img: img || '', sticker: sticker || '', ts, status: 'pending' };
     if (video) { m.video = Object.assign({ ready: true }, meta); await this.store.putBlob(rumor.id, video.data); }
+    if (audio) { m.audio = Object.assign({ ready: true }, meta); await this.store.putBlob(rumor.id, audio.data); }
+    if (exp) m.exp = exp; if (fwd) m.fwd = true; if (fx) m.fx = fx; if (mentions && mentions.length) m.mt = mentions.slice(0, 16);
     if (group) m.g = gidOf(chatId);
     if (replyTo) m.re = { id: replyTo.id, from: replyTo.from || '', text: String(replyTo.text || '').slice(0, 120) };
     const chat = this.store.chat(chatId);
@@ -589,7 +771,7 @@ export class App extends EventTarget {
     try {
       if (group) await this.publishToMany(this.members(chatId), rumor, false, true);
       else await this.publishRumor(chatId, rumor, false, true);
-      if (video) await this.sendChunks(chatId, rumor.id, parts);
+      if (parts.length) await this.sendChunks(chatId, rumor.id, parts);
       if (m.status === 'pending') m.status = 'sent';
       this.emit('sent', { chatId, to: group ? this.members(chatId).filter((p) => p !== this.pk) : [chatId] });
     } catch (e) {
@@ -628,12 +810,12 @@ export class App extends EventTarget {
     this.chunkTimers[vid] = setTimeout(() => this.requestMissing(vid), 15000);
   }
   requestMissing(vid) {
-    const hit = this.findMessage(vid); if (!hit || hit.m.kind !== 'video' || hit.m.video.ready || hit.m.from === this.pk) return;
-    const e = this.state.mediaParts[vid]; const n = hit.m.video.n; if (!n) return;
+    const hit = this.findMessage(vid); const md = hit && this.med(hit.m); if (!md || md.ready || hit.m.from === this.pk) return;
+    const e = this.state.mediaParts[vid]; const n = md.n; if (!n) return;
     const miss = []; for (let i = 0; i < n; i++) if (!e || !e.parts[i]) miss.push(i);
     if (!miss.length) return;
-    hit.m.video.tries = (hit.m.video.tries || 0) + 1;
-    if (hit.m.video.tries > 6) return;
+    md.tries = (md.tries || 0) + 1;
+    if (md.tries > 6) return;
     this.sendControl(hit.m.from, { t: 'vreq', v: vid, miss: miss.slice(0, 60) });
     this.scheduleChunkCheck(vid);
   }
@@ -662,21 +844,22 @@ export class App extends EventTarget {
     this.assembleVideo(vid);
   }
 
+  med(m) { return m && (m.video || m.audio) || null; }
   findMessage(id) {
     for (const [chatId, chat] of Object.entries(this.state.chats)) { const m = chat.messages.find((x) => x.id === id); if (m) return { chatId, m }; }
     return null;
   }
 
   assembleVideo(vid) {
-    const hit = this.findMessage(vid); if (!hit || hit.m.kind !== 'video' || hit.m.video.ready) return;
-    const e = this.state.mediaParts[vid]; const n = hit.m.video.n;
+    const hit = this.findMessage(vid); const md = hit && this.med(hit.m); if (!md || md.ready) return;
+    const e = this.state.mediaParts[vid]; const n = md.n;
     const got = e ? Object.keys(e.parts).length : 0;
-    hit.m.video.got = got;
+    md.got = got;
     if (!e || !n || got < n || e.from !== hit.m.from) { this.emit('media', { vid, got, n }); if (this.ready) this.scheduleChunkCheck(vid); return; }
     clearTimeout((this.chunkTimers || {})[vid]);
     let data = ''; for (let i = 0; i < n; i++) data += e.parts[i];
     delete this.state.mediaParts[vid];
-    hit.m.video.ready = true;
+    md.ready = true;
     this.store.putBlob(vid, data).then(() => this.emit('media', { vid, ready: true }));
   }
 
@@ -688,6 +871,10 @@ export class App extends EventTarget {
     if (!m) return;
     chat.messages.splice(chat.messages.indexOf(m), 1);
     this.store.save();
+    if (m.kind === 'audio') {
+      const data = await this.getVideo(id); if (!data) throw new Error('Voice message is no longer on this device');
+      return this.sendMessage(chatId, { audio: { data, mime: m.audio.mime, dur: m.audio.dur, wave: m.audio.wave }, replyTo: m.re });
+    }
     if (m.kind === 'video') {
       const data = await this.getVideo(id); if (!data) throw new Error('Video is no longer on this device');
       return this.sendMessage(chatId, { video: { data, mime: m.video.mime, dur: m.video.dur, w: m.video.w, h: m.video.h, poster: m.video.poster }, replyTo: m.re });
@@ -796,6 +983,7 @@ export class App extends EventTarget {
   /* ---------- presence ---------- */
   startPresence() {
     clearInterval(this.presenceTimer);
+    this.sweepExpired(); this.sweepTimer = setInterval(() => this.sweepExpired(), 60000);
     this.presenceTimer = setInterval(() => {
       if (this.visible || (this.hiddenSince && Date.now() - this.hiddenSince < BG_PRESENCE_MS)) this.sendPresence(null, false);
       else if (this.hiddenSince && !this.bgOff) { this.bgOff = true; this.sendPresence(null, false, true); }

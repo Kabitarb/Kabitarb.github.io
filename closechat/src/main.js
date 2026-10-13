@@ -5,7 +5,7 @@ import { Transport, DEFAULT_RELAYS } from './relay.js';
 import { encodeRecoveryKey, decodeRecoveryKey } from './crypto.js';
 import { resolveLogin, setPassword, checkPassword, republishKeystore, RecoveryClient } from './account.js';
 import { Store, settings, session } from './store.js';
-import { App, isGroupId, gidOf, profileFp } from './app.js';
+import { App, isGroupId, gidOf, profileFp, EXPIRE_OPTIONS } from './app.js';
 import { CallManager, Tones } from './rtc.js';
 import { PACKS, stickerIds, stickerSvg, animIds, animOf, animHtml } from './stickers.js';
 import { GameManager, GAMES, renderTTT, renderLudo, ludoXY } from './games.js';
@@ -35,6 +35,7 @@ function applyTheme() {
   const s = settings.get();
   document.documentElement.dataset.theme = s.theme;
   document.documentElement.dataset.accent = s.accent;
+  document.documentElement.dataset.font = s.font || 'normal';
   const meta = document.querySelector('meta[name=theme-color]');
   if (meta) meta.content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#0b1016';
 }
@@ -78,7 +79,7 @@ const COLORS = ['#2d8cff', '#8b5cf6', '#22c55e', '#ec4899', '#f97316', '#14b8a6'
 function colorOf(id) { let h = 0; const s = String(id || ''); for (let i = 0; i < Math.min(16, s.length); i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return COLORS[h % COLORS.length]; }
 function initials(name) { const p = (name || '?').trim().split(/\s+/); return ((p[0][0] || '') + (p[1] ? p[1][0] : '')).toUpperCase(); }
 function avatarInner(id, name = '') {
-  if (isGroupId(id)) return GROUP_SVG;
+  if (isGroupId(id)) { const g = app && app.group(id); return g && g.av ? `<img src="${g.av}" alt="">` : GROUP_SVG; }
   const av = app ? app.avatarOf(id) : '';
   const known = app && (app.isFriend(id) || id === app.pk);
   return av ? `<img src="${av}" alt="">` : esc(initials(name && !known ? name : app ? app.nameOf(id) : '?'));
@@ -407,6 +408,7 @@ async function startApp(sk, newName, username) {
   share = new ShareManager(app);
   wireApp(); wireCalls(); wireGames(); wireWatch(); wireShare();
   $('auth').classList.add('hidden'); $('main').classList.remove('hidden');
+  window.dispatchEvent(new Event('chatly:ready'));
   $('login-form').reset(); $('signup-form').reset();
   renderAll();
   app.start().then(() => {
@@ -447,6 +449,8 @@ function wireApp() {
     if (!fresh) return;
     const s = settings.get();
     const onScreen = app.openChat === chatId && !document.hidden;
+    const muted = !!app.store.chat(chatId).mute;
+    if (muted && !onScreen) { updateBadge(); return; }
     if (!onScreen) {
       if (s.sounds) tones.notify();
       if (s.notifications && document.hidden) {
@@ -500,6 +504,8 @@ function wireApp() {
   app.addEventListener('resuming', () => showSync(true));
   app.addEventListener('resumed', () => showSync(false));
   app.addEventListener('reaction', (e) => onReaction(e.detail));
+  app.addEventListener('message-changed', (e) => { if (e.detail.chatId === app.openChat) { renderedFor = null; renderChat(); } scheduleRender(); });
+  app.addEventListener('chatflag', () => scheduleRender());
 }
 let syncEl = null, syncTimer = null;
 function showSync(on) {
@@ -561,11 +567,13 @@ function renderChatList() {
   const friends = Object.entries(app.state.friends).filter(([, f]) => f.status === 'friend' || f.status === 'pending').map(([pk, f]) => ({ id: pk, since: f.since, pending: f.status === 'pending', chat: app.store.chat(pk) }));
   const groups = Object.entries(app.state.groups).map(([gid, g]) => ({ id: 'g:' + gid, since: g.since, chat: app.store.chat('g:' + gid) }));
   renderActiveRow();
-  const items = [...friends, ...groups]
-    .filter((x) => !q || app.nameOf(x.id).toLowerCase().includes(q))
-    .sort((a, b) => (b.chat.lastTs || b.since || 0) - (a.chat.lastTs || a.since || 0));
+  const all = [...friends, ...groups].filter((x) => !q || app.nameOf(x.id).toLowerCase().includes(q));
+  const archived = all.filter((x) => x.chat.arch);
+  const items = (showArchived ? archived : all.filter((x) => !x.chat.arch))
+    .sort((a, b) => (!!b.chat.pin - !!a.chat.pin) || (b.chat.lastTs || b.since || 0) - (a.chat.lastTs || a.since || 0));
   const el = $('chat-list');
-  if (!items.length) {
+  if (showArchived && !archived.length) showArchived = false;
+  if (!items.length && !archived.length) {
     el.innerHTML = `<div class="empty-list"><p>No close friends yet.</p><p class="tiny">Share your invite link or scan a friend's code to start.</p><button class="btn primary" id="empty-add">Add a friend</button></div>`;
     $('empty-add').onclick = openAddFriend; return;
   }
@@ -576,14 +584,68 @@ function renderChatList() {
     let preview = last ? ((plain ? '' : last.from === app.pk ? 'You: ' : isGroupId(id) && last.from ? app.nameOf(last.from) + ': ' : '') + previewOf(last)) : pending ? 'Waiting for them to accept' : 'Say hi 👋';
     const t = typingState[id];
     if (t) preview = `<i>${isGroupId(id) ? esc(app.nameOf(t.pk)) + ' is ' : ''}typing…</i>`; else preview = esc(preview);
-    return `<div class="item ${chat.unread ? 'unread-item' : ''} ${app.openChat === id ? 'active' : ''}" data-id="${id}">
+    const unread = chat.unread || (chat.markUnread ? '•' : 0);
+    return `<div class="item ${unread ? 'unread-item' : ''} ${chat.mute ? 'muted' : ''} ${app.openChat === id ? 'active' : ''}" data-id="${id}"><div class="inner">
       ${avatarHtml(id)}
-      <div class="body"><div class="top"><span class="name">${esc(app.nameOf(id))}</span>${pending ? '<span class="pend">Request sent</span>' : `<span class="time">${fmtListTime(chat.lastTs)}</span>`}</div>
-      <div class="preview"><span>${preview}</span>${chat.unread ? `<span class="unread">${chat.unread}</span>` : ''}</div></div></div>`;
-  }).join('');
-  el.querySelectorAll('.item').forEach((i) => { i.onclick = () => openChat(i.dataset.id); });
+      <div class="body"><div class="top"><span class="name">${esc(app.nameOf(id))}<span class="flags">${chat.pin ? '📌' : ''}${chat.mute ? '🔕' : ''}${chat.expire ? '⏱' : ''}</span></span>${pending ? '<span class="pend">Request sent</span>' : `<span class="time">${fmtListTime(chat.lastTs)}</span>`}</div>
+      <div class="preview"><span>${preview}</span>${unread ? `<span class="unread">${unread}</span>` : ''}</div></div></div>
+      <div class="acts"><button class="a-pin" data-act="pin"><span>📌</span>${chat.pin ? 'Unpin' : 'Pin'}</button><button class="a-mute" data-act="mute"><span>${chat.mute ? '🔔' : '🔕'}</span>${chat.mute ? 'Unmute' : 'Mute'}</button><button class="a-arch" data-act="arch"><span>🗄️</span>${chat.arch ? 'Unarchive' : 'Archive'}</button></div></div>`;
+  }).join('') + (showArchived ? `<div class="archived-link" id="arch-link"><span>‹ Back to chats</span></div>` : archived.length ? `<div class="archived-link" id="arch-link"><span>🗄️ Archived</span><span>${archived.length}</span></div>` : '');
+  el.querySelectorAll('.item').forEach((i) => {
+    i.onclick = (e) => { if (e.target.closest('.acts')) return; if (i.classList.contains('swiped')) { unswipe(); return; } openChat(i.dataset.id); };
+    i.querySelectorAll('[data-act]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); chatFlag(i.dataset.id, b.dataset.act); }; });
+  });
+  const al = $('arch-link'); if (al) al.onclick = () => { showArchived = !showArchived; renderChatList(); };
   flipPlay(el, before);
 }
+let showArchived = false;
+function unswipe() { document.querySelectorAll('#chat-list .item.swiped').forEach((x) => { x.classList.remove('swiped'); x.querySelector('.inner').style.transform = ''; }); }
+function chatFlag(id, act) {
+  const chat = app.store.chat(id); haptic();
+  if (act === 'pin') { app.setChatFlag(id, { pin: !chat.pin }); toast(chat.pin ? 'Pinned' : 'Unpinned'); }
+  else if (act === 'mute') { app.setChatFlag(id, { mute: !chat.mute }); toast(chat.mute ? 'Muted — no sounds or notifications' : 'Unmuted'); }
+  else if (act === 'arch') { app.setChatFlag(id, { arch: !chat.arch }); toast(chat.arch ? 'Archived' : 'Unarchived'); }
+  else if (act === 'unread') { if (chat.unread || chat.markUnread) { chat.unread = 0; app.setChatFlag(id, { markUnread: false }); } else app.setChatFlag(id, { markUnread: true }); }
+  renderChatList();
+}
+async function chatListMenu(id) {
+  const chat = app.store.chat(id);
+  const act = await menuSheet([
+    { id: 'pin', label: chat.pin ? 'Unpin chat' : 'Pin chat' },
+    { id: 'mute', label: chat.mute ? 'Unmute' : 'Mute notifications' },
+    { id: 'unread', label: chat.unread || chat.markUnread ? 'Mark as read' : 'Mark as unread' },
+    { id: 'arch', label: chat.arch ? 'Unarchive' : 'Archive' },
+  ]);
+  if (act) chatFlag(id, act);
+}
+(function chatListGestures() {
+  const el = $('chat-list');
+  let item = null, sx = 0, sy = 0, dx = 0, timer = null, fired = false;
+  el.addEventListener('touchstart', (e) => {
+    item = e.target.closest('.item'); if (!item) return;
+    const t = e.touches[0]; sx = t.clientX; sy = t.clientY; dx = 0; fired = false;
+    timer = setTimeout(() => { fired = true; haptic(20); chatListMenu(item.dataset.id); }, 520);
+  }, { passive: true });
+  el.addEventListener('touchmove', (e) => {
+    if (!item) return; const t = e.touches[0]; dx = t.clientX - sx;
+    if (Math.abs(dx) > 8 || Math.abs(t.clientY - sy) > 8) clearTimeout(timer);
+    if (Math.abs(t.clientY - sy) > 30) return;
+    const inner = item.querySelector('.inner'); const base = item.classList.contains('swiped') ? -216 : 0;
+    const x = Math.max(-216, Math.min(0, base + dx)); inner.style.transform = `translateX(${x}px)`;
+  }, { passive: true });
+  const end = (e) => {
+    clearTimeout(timer); if (!item) return;
+    if (fired && e.cancelable) e.preventDefault();
+    const inner = item.querySelector('.inner'); const was = item.classList.contains('swiped');
+    const open = was ? dx < 60 : dx < -70;
+    unswipe();
+    if (open) { item.classList.add('swiped'); inner.style.transform = 'translateX(-216px)'; } else inner.style.transform = '';
+    item = null;
+  };
+  el.addEventListener('touchend', end); el.addEventListener('touchcancel', end);
+  el.addEventListener('contextmenu', (e) => { const it = e.target.closest('.item'); if (it) { e.preventDefault(); chatListMenu(it.dataset.id); } });
+  el.addEventListener('click', (e) => { if (fired) { fired = false; e.stopPropagation(); e.preventDefault(); } }, true);
+})();
 function renderActiveRow() {
   const el = $('active-row');
   const on = app.friendPks().filter((pk) => app.isOnline(pk)).sort((a, b) => app.nameOf(a).localeCompare(app.nameOf(b)));
@@ -719,6 +781,16 @@ function renderSettings() {
       <div class="srow" style="flex-direction:column;align-items:stretch;gap:10px"><span>Accent color</span><div class="swatches">
         ${['blue', 'purple', 'green', 'pink', 'orange', 'teal'].map((a) => `<button class="swatch ${s.accent === a ? 'active' : ''}" data-accent="${a}" style="background:${{ blue: '#2d8cff', purple: '#8b5cf6', green: '#22c55e', pink: '#ec4899', orange: '#f97316', teal: '#14b8a6' }[a]}"></button>`).join('')}</div></div>
     </div>
+    <h4>Text size</h4>
+    <div class="card"><div class="srow" style="flex-direction:column;align-items:stretch;gap:10px"><div class="theme-opts">
+      ${['small', 'normal', 'large', 'xl'].map((t) => `<button class="theme-opt ${(s.font || 'normal') === t ? 'active' : ''}" data-font="${t}">${{ small: 'Small', normal: 'Default', large: 'Large', xl: 'Extra large' }[t]}</button>`).join('')}</div></div></div>
+    <h4>Privacy</h4>
+    <div class="card">
+      <div class="srow clickable" id="s-lock"><div><div>App lock</div><div class="tiny muted">${lock.enabled() ? `PIN${lock.bio() ? ' + Face ID / Touch ID' : ''} · locks after ${lock.afterLabel()}` : 'Ask for a PIN (or Face ID / Touch ID) when Chatly opens'}</div></div><span class="muted">${lock.enabled() ? 'On' : 'Off'} ›</span></div>
+      <div class="srow clickable" id="s-starred"><div><div>Starred messages</div><div class="tiny muted">${app.starred().length} starred</div></div><span class="muted">›</span></div>
+      <div class="srow clickable" id="s-export"><div><div>Export chats</div><div class="tiny muted">Encrypted file (needs a passphrase) you can import on another device.</div></div><span class="muted">›</span></div>
+      <div class="srow clickable" id="s-import"><div><div>Import chats</div><div class="tiny muted">Restore from a Chatly export file.</div></div><span class="muted">›</span></div>
+    </div>
     <h4>Notifications</h4>
     <div class="card">
       <div class="srow"><span>Message notifications</span><button class="switch ${s.notifications ? 'on' : ''}" data-set="notifications"></button></div>
@@ -764,6 +836,11 @@ function renderSettings() {
       renderSettings();
     };
   });
+  el.querySelectorAll('[data-font]').forEach((b) => { b.onclick = () => { settings.set({ font: b.dataset.font }); applyTheme(); renderSettings(); haptic(); }; });
+  $('s-lock').onclick = lockSettings;
+  $('s-starred').onclick = showStarred;
+  $('s-export').onclick = exportChats;
+  $('s-import').onclick = importChats;
   $('relay-save').onclick = () => {
     const list = $('relay-text').value.split(/\s+/).map((x) => x.trim()).filter((x) => /^wss?:\/\//.test(x));
     if (!list.length) { toast('Enter at least one wss:// relay', 'error'); return; }
@@ -926,6 +1003,19 @@ function openAvatarPicker(presetsFirst = false) {
   const rm = $('av-remove'); if (rm) rm.onclick = () => { app.setAvatar(''); hideModal(); toast('Photo removed'); };
 }
 // Drag/zoom crop before saving; resolves to a small square JPEG (<= 9 KB) or null.
+function pickGroupPhoto(gid) {
+  const g = app.state.groups[gid]; if (!g) return;
+  showModal(`<h3>Group photo</h3><div class="row"><label for="gp-input" class="btn primary" style="flex:1">${g.av ? 'Upload a new photo' : 'Upload photo'}</label>${g.av ? '<button class="btn ghost" id="gp-remove">Remove</button>' : ''}</div><input type="file" id="gp-input" accept="image/*" hidden>`);
+  const rm = $('gp-remove'); if (rm) rm.onclick = () => { app.setGroupPhoto(gid, ''); hideModal(); toast('Group photo removed'); renderedFor = null; renderChat(); scheduleRender(); };
+  $('gp-input').onchange = async () => {
+    const f = $('gp-input').files[0]; if (!f) return;
+    const url = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(f); });
+    const img = new Image(); await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; }).catch(() => null);
+    if (!img.width) { toast('Could not read that image', 'error'); return; }
+    const out = await cropSheet(img); if (!out) return;
+    app.setGroupPhoto(gid, out); toast('Group photo updated'); renderedFor = null; renderChat(); scheduleRender();
+  };
+}
 function cropSheet(img) {
   return new Promise((res) => {
     const S = 280;
@@ -1017,7 +1107,10 @@ function openChat(id) {
   if (!id) return;
   if (app.openChat && app.openChat !== id) app.store.chat(app.openChat).draft = $('input').value;
   app.setOpenChat(id);
+  if (app.store.chat(id).markUnread) app.setChatFlag(id, { markUnread: false });
+  renderLimit = 80; closeSearch(false);
   renderedFor = null; replyTo = null; unseen = 0; renderReplyBar();
+  $('composer').classList.toggle('has-text', !!(app.store.chat(id).draft || '').trim());
   clearTimeout(chatAnimTimer); document.body.classList.remove('chat-closing');
   $('chat').style.transform = ''; $('side').style.transform = '';
   if (isPhone() && !document.body.classList.contains('chat-open') && !reducedMotion()) {
@@ -1135,8 +1228,11 @@ function renderChat(scrollToEnd = false) {
 
   const box = $('messages');
   const chat = app.store.chat(id);
+  if (chat.wall) box.dataset.wall = chat.wall; else delete box.dataset.wall;
+  if (chat.bubble) box.dataset.bubble = chat.bubble; else delete box.dataset.bubble;
+  renderPinBar(chat);
   const wasAtBottom = atBottom();
-  const key = id + ':' + chat.messages.length + ':' + chat.messages.map((m) => m.id.slice(0, 8) + (m.status || '') + (m.rx ? Object.values(m.rx).map((r) => r.e).join('') : '') + (m.video ? (m.video.ready ? 'R' : m.video.got || 0) + ':' + (app.sending[m.id] ?? '') : '')).join('') + ':' + (group && g ? g.members.length : '') + ':' + [...playing].join('');
+  const key = id + ':' + chat.messages.length + ':' + renderLimit + ':' + (chat.pinned || []).join('') + ':' + chat.messages.map((m) => m.id.slice(0, 8) + (m.status || '') + (m.edited ? 'E' : '') + (m.deleted ? 'D' : '') + (m.star ? 'S' : '') + (m.votes ? JSON.stringify(m.votes) : '') + (m.audio ? (m.audio.ready ? 'R' : m.audio.got || 0) + ':' + (app.sending[m.id] ?? '') + (audioEls[m.id] ? (audioEls[m.id].paused ? 'p' : 'P') + (audioRate[m.id] || 1) : '') : '') + (m.rx ? Object.values(m.rx).map((r) => r.e).join('') : '') + (m.video ? (m.video.ready ? 'R' : m.video.got || 0) + ':' + (app.sending[m.id] ?? '') : '')).join('') + ':' + (group && g ? g.members.length : '') + ':' + [...playing].join('');
   if (renderedFor !== key) {
     renderedFor = key;
     if (renderedChat !== id) { renderedIds = new Set(chat.messages.map((m) => m.id)); renderedChat = id; }
@@ -1144,7 +1240,9 @@ function renderChat(scrollToEnd = false) {
     const byId = new Map(chat.messages.map((m) => [m.id, m]));
     let html = `<div class="lock-note">🔒 ${group ? 'Group messages are encrypted separately for each member. Only members can read them.' : 'Messages and calls are end-to-end encrypted. Nobody outside this chat — not even the relays — can read them.'}</div>`;
     let lastDay = '', prev = null;
-    for (const m of chat.messages) {
+    const win = chat.messages.length > renderLimit ? chat.messages.slice(chat.messages.length - renderLimit) : chat.messages;
+    if (win.length < chat.messages.length) html += `<button class="load-earlier" id="load-earlier">Load earlier messages (${chat.messages.length - win.length})</button>`;
+    for (const m of win) {
       const day = fmtDay(m.ts);
       if (day !== lastDay) { html += `<div class="day">${day}</div>`; lastDay = day; prev = null; }
       if (m.kind === 'system') { html += `<div class="sys">${esc(m.text)}</div>`; prev = null; continue; }
@@ -1159,14 +1257,18 @@ function renderChat(scrollToEnd = false) {
         html += `<div class="card-msg ${isNew(m) ? 'anim' : ''}" data-id="${m.id}"><span class="ic">${GAMES[m.type] ? GAMES[m.type].icon : '🎮'}</span><div class="body"><div>${esc(m.text)}</div><div class="sub">${fmtTime(m.ts)}${s && s.status === 'lobby' ? ` · ${s.players.length}/${GAMES[s.type].max} players` : ''}</div></div>${active && label ? `<button class="btn primary small" data-game="${m.gameId}">${label}</button>` : ''}</div>`;
         prev = null; continue;
       }
+      if (m.kind === 'poll') { html += pollHtml(m, isNew(m)); prev = null; continue; }
       const out = m.from === app.pk;
       const cont = prev && prev.from === m.from && m.ts - prev.ts < 3 * 60000 && !m.re;
       const emojiOnly = m.kind === 'text' && m.text.length <= 8 && EMOJI_RE.test(m.text);
       let body;
-      if (m.kind === 'image') body = `<img src="${m.img}" alt="Photo" data-full="1">`;
+      if (m.deleted) body = `<span class="deleted">🚫 ${out ? 'You deleted this message' : 'This message was deleted'}</span>`;
+      else if (m.kind === 'image') body = `<img src="${m.img}" alt="Photo" data-full="1" loading="lazy">`;
+      else if (m.kind === 'audio') body = audioHtml(m);
       else if (m.kind === 'video') body = videoHtml(m);
       else if (m.kind === 'sticker') body = animHtml(m.sticker) || stickerSvg(m.sticker) || '<span class="muted">Sticker</span>';
-      else { body = linkify(m.text); const mm = m.text.match(MEDIA_RE); if (mm) body += mediaCard(mm[0], out); }
+      else { body = mentionify(linkify(m.text), m); const mm = m.text.match(MEDIA_RE); if (mm) body += mediaCard(mm[0], out); const geo = m.text.match(GEO_RE); if (geo) body = geoCard(geo, m.text); }
+      if (m.fwd && !m.deleted) body = `<div class="fwd">↪ Forwarded</div>` + body;
       let quote = '';
       if (m.re) {
         const orig = byId.get(m.re.id);
@@ -1181,7 +1283,7 @@ function renderChat(scrollToEnd = false) {
         else tick = `<span class="tick ${m.status === 'read' ? 'read' : ''}">${m.status === 'sent' || group ? '✓' : '✓✓'}</span>`;
       }
       const sender = group && !out && !cont ? `<div class="sender" style="color:${colorOf(m.from)}">${esc(app.nameOf(m.from))}</div>` : '';
-      html += `<div class="msg ${out ? 'out' : 'in'} ${emojiOnly ? 'emoji-only' : ''} ${m.kind === 'sticker' ? (animOf(m.sticker) ? 'aemoji-msg' : 'sticker-msg') : m.kind === 'video' ? 'video-msg' : ''} ${cont ? 'cont' : ''} ${isNew(m) ? 'anim' : ''} ${m.rx ? 'has-rx' : ''}" data-id="${m.id}">${sender}<div class="bubble">${quote}${body}</div><div class="meta">${fmtTime(m.ts)} ${tick}</div><button class="act" data-reply="${m.id}" title="Reply">${REPLY_SVG}</button>${rxHtml(m)}</div>`;
+      html += `<div class="msg ${out ? 'out' : 'in'} ${emojiOnly ? 'emoji-only' : ''} ${m.kind === 'sticker' ? (animOf(m.sticker) ? 'aemoji-msg' : 'sticker-msg') : m.kind === 'video' ? 'video-msg' : ''} ${cont ? 'cont' : ''} ${isNew(m) ? 'anim' : ''} ${m.mt && m.mt.includes(app.pk) ? 'mentioned' : ''} ${m.rx ? 'has-rx' : ''}" data-id="${m.id}">${sender}<div class="bubble">${quote}${body}</div><div class="meta">${fmtTime(m.ts)}${m.edited ? ' · edited' : ''}${m.exp ? ' · ⏱' : ''}${m.star ? ' · ★' : ''}${''} ${tick}</div><button class="act" data-reply="${m.id}" title="Reply">${REPLY_SVG}</button>${rxHtml(m)}</div>`;
       prev = m;
     }
     box.innerHTML = html;
@@ -1189,6 +1291,10 @@ function renderChat(scrollToEnd = false) {
     box.querySelectorAll('img[data-full]').forEach((img) => { img.onclick = () => openViewer(img.src, img); });
     box.querySelectorAll('[data-resend]').forEach((el) => { el.onclick = () => app.resend(id, el.dataset.resend).catch((e) => toast(e.message, 'error')); });
     box.querySelectorAll('[data-play]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); playVideo(el.dataset.play); }; });
+    box.querySelectorAll('[data-aplay]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); playAudio(el.dataset.aplay); }; });
+    box.querySelectorAll('[data-arate]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); cycleRate(el.dataset.arate); }; });
+    box.querySelectorAll('[data-vote]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); const mid = el.closest('.poll').dataset.id; haptic(); app.vote(id, mid, Number(el.dataset.vote)); renderedFor = null; renderChat(); }; });
+    box.querySelectorAll('.msg.anim[data-id]').forEach((el) => { const m = byId.get(el.dataset.id); if (m && m.fx && m.from !== app.pk && !playedFx.has(m.id)) { playedFx.add(m.id); playEffect(m.fx); } });
     box.querySelectorAll('.vid video').forEach((el) => { el.onclick = (e) => e.stopPropagation(); });
     box.querySelectorAll('[data-reply]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); setReply(el.dataset.reply); }; });
     box.querySelectorAll('[data-rx-toggle]').forEach((el) => { el.onclick = (e) => { e.stopPropagation(); const mid = el.closest('.msg').dataset.id; haptic(); app.react(id, mid, el.dataset.rxToggle); }; });
@@ -1197,10 +1303,50 @@ function renderChat(scrollToEnd = false) {
     box.querySelectorAll('[data-callback]').forEach((el) => { el.onclick = () => startCall(id, el.dataset.callback === 'v'); });
     box.querySelectorAll('[data-game]').forEach((el) => { el.onclick = () => openGame(el.dataset.game); });
     box.querySelectorAll('.msg .meta').forEach((el) => { el.parentElement.querySelector('.bubble').addEventListener('click', () => el.classList.toggle('show')); });
+    const le = $('load-earlier'); if (le) le.onclick = () => { const h = box.scrollHeight; renderLimit += 120; renderedFor = null; renderChat(); box.scrollTop = box.scrollHeight - h; };
+    if (searchHits.length) markHits();
     if (scrollToEnd || wasAtBottom || scrollNext) { box.scrollTop = box.scrollHeight; scrollNext = false; }
     updateJump();
   }
 }
+let renderLimit = 80;
+function renderPinBar(chat) {
+  const bar = $('pin-bar'); const ids = chat.pinned || [];
+  const m = ids.length ? chat.messages.find((x) => x.id === ids[ids.length - 1]) : null;
+  bar.classList.toggle('hidden', !m);
+  if (!m) return;
+  $('pin-text').innerHTML = `<b>Pinned message${ids.length > 1 ? ` (${ids.length})` : ''}</b>${esc(previewOf(m))}`;
+  $('pin-text').onclick = () => { ensureVisible(m.id); jumpTo(m.id); };
+  $('pin-close').onclick = async () => { if (await confirmSheet('Unpin message?', '', 'Unpin', false)) { app.pinMessage(app.openChat, m.id, false); renderedFor = null; renderChat(); } };
+}
+function ensureVisible(mid) {
+  const chat = app.store.chat(app.openChat); const idx = chat.messages.findIndex((x) => x.id === mid);
+  if (idx < 0) return;
+  const need = chat.messages.length - idx;
+  if (need > renderLimit) { renderLimit = need + 20; renderedFor = null; renderChat(); }
+}
+/* ---- in-chat search ---- */
+let searchHits = [], searchIdx = -1;
+function openSearch() { $('search-bar').classList.remove('hidden'); $('msg-search').value = ''; $('search-count').textContent = ''; searchHits = []; searchIdx = -1; setTimeout(() => $('msg-search').focus(), 50); }
+function closeSearch(render = true) { $('search-bar').classList.add('hidden'); searchHits = []; searchIdx = -1; document.querySelectorAll('.msg.hit').forEach((x) => x.classList.remove('hit')); if (render) { renderedFor = null; renderChat(); } }
+function markHits() { document.querySelectorAll('.msg.hit').forEach((x) => x.classList.remove('hit')); for (const h of searchHits) { const el = $('messages').querySelector(`.msg[data-id="${h}"]`); if (el) el.classList.add('hit'); } }
+function runSearch() {
+  const q = $('msg-search').value;
+  searchHits = app.search(app.openChat, q); searchIdx = searchHits.length ? searchHits.length - 1 : -1;
+  $('search-count').textContent = q ? (searchHits.length ? `${searchIdx + 1}/${searchHits.length}` : 'No results') : '';
+  markHits();
+  if (searchIdx >= 0) { ensureVisible(searchHits[searchIdx]); markHits(); jumpTo(searchHits[searchIdx]); }
+}
+function stepSearch(d) {
+  if (!searchHits.length) return;
+  searchIdx = (searchIdx + d + searchHits.length) % searchHits.length;
+  $('search-count').textContent = `${searchIdx + 1}/${searchHits.length}`;
+  ensureVisible(searchHits[searchIdx]); markHits(); jumpTo(searchHits[searchIdx]);
+}
+let searchTimer = null;
+$('msg-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(runSearch, 200); });
+$('msg-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); stepSearch(e.shiftKey ? 1 : -1); } if (e.key === 'Escape') closeSearch(); });
+$('search-prev').onclick = () => stepSearch(-1); $('search-next').onclick = () => stepSearch(1); $('search-close').onclick = () => closeSearch();
 const PLAY_SVG = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
 const playing = new Set();
 function videoHtml(m) {
@@ -1216,6 +1362,80 @@ function videoHtml(m) {
   else overlay = `<button class="play" data-play="${m.id}" title="Play">${PLAY_SVG}</button>`;
   return `<div class="vid" style="--ar:${ar}" data-vid="${m.id}">${poster}${overlay}${v.dur ? `<span class="dur">${fmtClock(v.dur)}</span>` : ''}</div>`;
 }
+const GEO_RE = /https:\/\/www\.openstreetmap\.org\/\?mlat=(-?\d+(?:\.\d+)?)&mlon=(-?\d+(?:\.\d+)?)[^\s]*/;
+function geoCard(geo, text) {
+  const lat = Number(geo[1]).toFixed(5), lon = Number(geo[2]).toFixed(5);
+  const d = 0.004;
+  const bbox = `${(+lon - d).toFixed(5)},${(+lat - d).toFixed(5)},${(+lon + d).toFixed(5)},${(+lat + d).toFixed(5)}`;
+  const label = text.replace(geo[0], '').replace('📍', '').trim();
+  return `<div class="geo"><iframe loading="lazy" referrerpolicy="no-referrer" src="https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat},${lon}"></iframe>
+    <div class="geo-foot"><span>📍 ${esc(label || 'Shared location')}<br><span class="tiny muted">${lat}, ${lon}</span></span><a class="btn ghost small" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${lat},${lon}">Open in Maps</a></div></div>`;
+}
+function mentionify(html, m) {
+  if (!m.mt || !m.mt.length) return html;
+  for (const pk of m.mt) {
+    const n = app.nameOf(pk); if (!n) continue;
+    html = html.split('@' + esc(n)).join(`<span class="mention ${pk === app.pk ? 'me' : ''}">@${esc(n)}</span>`);
+  }
+  return html;
+}
+function pollHtml(m, anim) {
+  const votes = m.votes || {}; const total = Object.keys(votes).length;
+  const mine = votes[app.pk];
+  const out = m.from === app.pk;
+  if (m.deleted) return `<div class="msg ${out ? 'out' : 'in'}" data-id="${m.id}"><div class="bubble"><span class="deleted">🚫 This poll was deleted</span></div></div>`;
+  const rows = m.opts.map((o, i) => { const n = Object.values(votes).filter((v) => v === i).length; const pct = total ? Math.round(n / total * 100) : 0;
+    return `<button class="popt ${mine === i ? 'on' : ''}" data-vote="${i}"><i style="width:${pct}%"></i><span class="t">${esc(o)}</span><span class="n">${total ? pct + '%' : ''}</span></button>`; }).join('');
+  return `<div class="msg ${out ? 'out' : 'in'} ${anim ? 'anim' : ''} poll-msg" data-id="${m.id}"><div class="bubble poll" data-id="${m.id}">
+    ${!out && isGroupId(app.openChat) ? `<div class="sender" style="color:${colorOf(m.from)}">${esc(app.nameOf(m.from))}</div>` : ''}
+    <div class="pq">📊 ${esc(m.text)}</div>${rows}<div class="tiny muted">${total} vote${total === 1 ? '' : 's'} · ${fmtTime(m.ts)}</div></div></div>`;
+}
+const audioEls = {}; const audioRate = {};
+function audioHtml(m) {
+  const a = m.audio || {};
+  const w = (a.wave && a.wave.length ? a.wave : Array.from({ length: 32 }, () => 0.3)).map((v) => `<i style="height:${Math.max(12, Math.round(v * 100))}%"></i>`).join('');
+  const sending = app.sending[m.id];
+  let btn;
+  if (sending !== undefined && m.status === 'pending') btn = `<span class="aprog">${Math.round(sending / (a.n || 1) * 100)}%</span>`;
+  else if (!a.ready) btn = m.from === app.pk ? `<span class="aprog" title="Only on the device it was sent from">…</span>` : `<span class="aprog">${a.n ? Math.round((a.got || 0) / a.n * 100) : 0}%</span>`;
+  else btn = `<button class="aplay ${audioEls[m.id] && !audioEls[m.id].paused ? 'playing' : ''}" data-aplay="${m.id}">${audioEls[m.id] && !audioEls[m.id].paused ? '<svg viewBox="0 0 24 24"><path d="M7 5h4v14H7zm6 0h4v14h-4z"/></svg>' : PLAY_SVG}</button>`;
+  const el = audioEls[m.id];
+  const pos = el && el.duration ? el.currentTime / el.duration : 0;
+  return `<div class="voice" data-aid="${m.id}">${btn}<div class="wave" style="--pos:${Math.round(pos * 100)}%">${w}</div><span class="adur">${fmtClock(el && !el.paused ? Math.round(el.currentTime) : (a.dur || 0))}</span>${el ? `<button class="arate" data-arate="${m.id}">${audioRate[m.id] || 1}×</button>` : ''}</div>`;
+}
+async function playAudio(id) {
+  let el = audioEls[id];
+  if (!el) {
+    const data = await app.getVideo(id); if (!data) { toast('Voice message is not on this device'); return; }
+    el = audioEls[id] = new Audio(data); el.playbackRate = audioRate[id] || 1;
+    el.ontimeupdate = () => { const v = document.querySelector(`.voice[data-aid="${id}"]`); if (!v) return; const w = v.querySelector('.wave'); if (w && el.duration) w.style.setProperty('--pos', Math.round(el.currentTime / el.duration * 100) + '%'); const d = v.querySelector('.adur'); if (d) d.textContent = fmtClock(Math.round(el.currentTime)); };
+    el.onended = () => { renderedFor = null; renderChat(); const hit = app.findMessage(id); if (hit) { const next = app.store.chat(hit.chatId).messages.find((x) => x.kind === 'audio' && x.ts > hit.m.ts && x.from !== app.pk && x.audio && x.audio.ready && !audioEls[x.id]); if (next) playAudio(next.id); } };
+    el.onpause = () => { renderedFor = null; renderChat(); };
+    el.onplay = () => { for (const [k, o] of Object.entries(audioEls)) if (k !== id && !o.paused) o.pause(); renderedFor = null; renderChat(); };
+  }
+  if (el.paused) el.play().catch(() => toast('Could not play', 'error')); else el.pause();
+}
+function cycleRate(id) {
+  const r = audioRate[id] || 1; const next = r === 1 ? 1.5 : r === 1.5 ? 2 : 1;
+  audioRate[id] = next; if (audioEls[id]) audioEls[id].playbackRate = next;
+  renderedFor = null; renderChat();
+}
+const playedFx = new Set();
+function playEffect(name) {
+  if (reducedMotion()) return;
+  const host = $('messages').parentElement;
+  if (name === 'confetti') { confetti(host); return; }
+  const glyph = { hearts: '❤️', balloons: '🎈', fire: '🔥', stars: '✨', laugh: '😂', party: '🎉' }[name];
+  if (!glyph) return;
+  const layer = document.createElement('div'); layer.className = 'fx-layer'; host.appendChild(layer);
+  for (let i = 0; i < 18; i++) {
+    const sp = document.createElement('span'); sp.textContent = glyph; sp.style.left = Math.random() * 100 + '%'; sp.style.animationDelay = (Math.random() * 0.9) + 's'; sp.style.fontSize = (22 + Math.random() * 26) + 'px';
+    layer.appendChild(sp);
+  }
+  haptic(30);
+  setTimeout(() => layer.remove(), 3200);
+}
+
 async function playVideo(id) {
   const data = await app.getVideo(id);
   if (!data) { toast('Video is not on this device'); return; }
@@ -1316,18 +1536,37 @@ $('reply-cancel').onclick = () => { replyTo = null; renderReplyBar(); };
   const mEnd = (e) => { if (e.pointerType !== 'mouse') return; clearTimeout(mTimer); mTimer = null; };
   box.addEventListener('pointerup', mEnd); box.addEventListener('pointercancel', mEnd); box.addEventListener('pointerleave', mEnd);
   box.addEventListener('click', (e) => { if (mFired) { mFired = false; e.stopPropagation(); e.preventDefault(); } }, true);
-  box.addEventListener('dblclick', (e) => { const m = msgOf(e.target); if (m && window.innerWidth >= 860) setReply(m.dataset.id); });
+  const heartTap = (m, x, y) => {
+    if (!m || m.classList.contains('sys') || !app.openChat) return;
+    const mid = m.dataset.id; const msg = app.store.chat(app.openChat).messages.find((x) => x.id === mid); if (!msg || msg.deleted || msg.kind === 'poll') return;
+    const mine = (msg.rx || {})[app.pk]; if (mine && mine.e === '❤️') return;
+    app.react(app.openChat, mid, '❤️'); haptic(12); fx(1000, 0.08, 0, 0.04, 'sine');
+    if (!reducedMotion()) { const h = document.createElement('div'); h.className = 'heart-pop'; h.textContent = '❤️'; h.style.left = x + 'px'; h.style.top = y + 'px'; document.body.appendChild(h); setTimeout(() => h.remove(), 900); }
+  };
+  box.addEventListener('dblclick', (e) => { const m = msgOf(e.target); if (!m) return; if (window.innerWidth >= 860 && !e.target.closest('.bubble')) setReply(m.dataset.id); else heartTap(m, e.clientX, e.clientY); });
+  let lastTap = { t: 0, id: '' };
+  box.addEventListener('touchend', (e) => {
+    const m = msgOf(e.target); if (!m || e.changedTouches.length !== 1) return;
+    const now = Date.now(); const t = e.changedTouches[0];
+    if (now - lastTap.t < 320 && lastTap.id === m.dataset.id) { e.preventDefault(); lastTap = { t: 0, id: '' }; heartTap(m, t.clientX, t.clientY); }
+    else lastTap = { t: now, id: m.dataset.id };
+  }, { passive: false });
 })();
 
 async function messageMenu(mid) {
   const id = app.openChat; const chat = app.store.chat(id);
   const m = chat.messages.find((x) => x.id === mid); if (!m) return;
   const items = [{ id: 'reply', label: 'Reply' }];
-  if (m.kind === 'text') items.push({ id: 'copy', label: 'Copy text' });
+  if (m.kind === 'text' && !m.deleted) items.push({ id: 'copy', label: 'Copy text' });
+  if (!m.deleted && ['text', 'image', 'sticker', 'video', 'audio'].includes(m.kind)) items.push({ id: 'forward', label: 'Forward' });
+  if (app.canEdit(m)) items.push({ id: 'edit', label: 'Edit' });
+  if (!m.deleted) items.push({ id: 'star', label: m.star ? 'Unstar' : 'Star' });
+  if (!m.deleted) { const pinned = (chat.pinned || []).includes(mid); items.push({ id: 'pin', label: pinned ? 'Unpin' : 'Pin' }); }
   if (m.kind === 'text' && MEDIA_RE.test(m.text)) items.push({ id: 'watch', label: 'Watch together' });
   if (m.kind === 'image') items.push({ id: 'view', label: 'View photo' });
   if (m.kind === 'video' && m.video && m.video.ready) items.push({ id: 'save', label: 'Save video' });
   items.push({ id: 'delete', label: 'Delete for me', danger: true });
+  if (m.from === app.pk && !m.deleted) items.push({ id: 'delall', label: 'Delete for everyone', danger: true });
   const mine = m.rx && m.rx[app.pk] ? m.rx[app.pk].e : '';
   const act = await reactionMenu(items, mine, (e) => { app.react(id, mid, e); fx(1000, 0.08, 0, 0.04, 'sine'); });
   if (act === 'reply') setReply(mid);
@@ -1336,6 +1575,20 @@ async function messageMenu(mid) {
   else if (act === 'view') { openViewer(m.img, document.querySelector(`.msg[data-id="${m.id}"] img`)); }
   else if (act === 'save') { const data = await app.getVideo(mid); if (!data) { toast('Video is not on this device'); return; } const a = document.createElement('a'); a.href = data; a.download = `chatly-video.${/webm/.test(m.video.mime) ? 'webm' : 'mp4'}`; a.click(); }
   else if (act === 'delete') { app.deleteLocal(id, mid); renderedFor = null; renderChat(); }
+  else if (act === 'delall') { if (await confirmSheet('Delete for everyone?', 'The message is removed for everyone in this chat.', 'Delete')) { app.deleteForAll(id, mid); renderedFor = null; renderChat(); } }
+  else if (act === 'edit') { const v = await promptSheet('Edit message', m.text, 'Message'); if (v !== null && v !== undefined && v.trim()) { try { app.editMessage(id, mid, v); renderedFor = null; renderChat(); } catch (e) { toast(e.message, 'error'); } } }
+  else if (act === 'star') { app.star(id, mid, !m.star); toast(m.star ? 'Starred' : 'Removed from starred'); renderedFor = null; renderChat(); }
+  else if (act === 'pin') { const on = !(chat.pinned || []).includes(mid); app.pinMessage(id, mid, on); toast(on ? 'Pinned' : 'Unpinned'); renderedFor = null; renderChat(); }
+  else if (act === 'forward') forwardMessage(m);
+}
+function forwardMessage(m) {
+  pickFriends('Forward to', [], async (ids) => {
+    for (const to of ids) {
+      if (m.kind === 'video' || m.kind === 'audio') { const data = await app.getVideo(m.id); if (!data) { toast('Media is not on this device'); continue; } const md = m.video || m.audio; await app.sendMessage(to, m.kind === 'video' ? { video: { data, mime: md.mime, dur: md.dur, w: md.w, h: md.h, poster: md.poster }, fwd: true } : { audio: { data, mime: md.mime, dur: md.dur, wave: md.wave }, fwd: true }); }
+      else await app.sendMessage(to, { text: m.text, img: m.img, sticker: m.sticker, fwd: true });
+    }
+    toast(`Forwarded to ${ids.length} chat${ids.length === 1 ? '' : 's'}`);
+  });
 }
 
 /* composer */
@@ -1352,8 +1605,96 @@ async function send() {
   $('picker').classList.add('hidden');
   const re = replyTo; replyTo = null; renderReplyBar();
   scrollNext = true; haptic(8);
-  const m = await app.sendMessage(id, { text, replyTo: re });
+  const fx = pendingFx; pendingFx = '';
+  const mentions = isGroupId(id) ? (app.group(id) ? app.group(id).members : []).filter((pk) => pk !== app.pk && text.includes('@' + app.nameOf(pk))) : [];
+  $('composer').classList.remove('has-text'); hideMentions();
+  const m = await app.sendMessage(id, { text, replyTo: re, fx, mentions });
+  if (fx) { const el = document.querySelector(`.msg[data-id="${m.id}"]`); if (fx === 'slam' && el) el.classList.add('slam'); else playEffect(fx); }
   if (m.status === 'failed') toast('Could not send: ' + (m.error || 'no relay reachable'), 'error');
+}
+input.addEventListener('input', () => { $('composer').classList.toggle('has-text', !!input.value.trim()); mentionCheck(); });
+/* ---- voice messages: hold the mic, slide left to cancel ---- */
+(function voiceRecorder() {
+  const mic = $('mic-btn'); const bar = $('rec-bar'); const wave = $('rec-wave');
+  let rec = null, stream = null, chunks = [], t0 = 0, timer = null, levels = [], cancel = false, sx = 0, ctx = null, an = null, raf = 0, active = false, pid = null;
+  const MAX_SEC = 180;
+  const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', ''].find((m) => !m || (window.MediaRecorder && MediaRecorder.isTypeSupported(m)));
+  mic.addEventListener('contextmenu', (e) => e.preventDefault());
+  const draw = () => {
+    if (!an) return;
+    const buf = new Uint8Array(an.fftSize); an.getByteTimeDomainData(buf);
+    let sum = 0; for (const v of buf) { const d = (v - 128) / 128; sum += d * d; }
+    const lvl = Math.min(1, Math.sqrt(sum / buf.length) * 3.2);
+    levels.push(lvl);
+    const i = document.createElement('i'); i.style.height = Math.max(3, Math.round(lvl * 26)) + 'px'; wave.appendChild(i);
+    while (wave.children.length > 60) wave.firstChild.remove();
+    const sec = (Date.now() - t0) / 1000; $('rec-time').textContent = fmtClock(sec);
+    if (sec >= MAX_SEC) { stop(false); return; }
+    raf = requestAnimationFrame(() => setTimeout(draw, 80));
+  };
+  async function start(e) {
+    if (active || !app.openChat) return;
+    if (!navigator.mediaDevices || !window.MediaRecorder) { toast('Voice messages are not supported in this browser', 'error'); return; }
+    active = true; cancel = false; sx = e.clientX; pid = e.pointerId; chunks = []; levels = [];
+    try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch { active = false; toast('Microphone permission denied', 'error'); return; }
+    if (!active) { stream.getTracks().forEach((t) => t.stop()); return; }
+    try { mic.setPointerCapture(pid); } catch {}
+    rec = new MediaRecorder(stream, mime ? { mimeType: mime, audioBitsPerSecond: 32000 } : undefined);
+    rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) chunks.push(ev.data); };
+    rec.start(250); t0 = Date.now();
+    ctx = new (window.AudioContext || window.webkitAudioContext)(); an = ctx.createAnalyser(); an.fftSize = 512; ctx.createMediaStreamSource(stream).connect(an);
+    wave.innerHTML = ''; $('rec-time').textContent = '0:00'; bar.classList.remove('hidden', 'cancel'); $('rec-hint').textContent = '‹ Slide to cancel';
+    $('composer').classList.add('recording'); haptic(15); fx(880, 0.06, 0, 0.03, 'sine');
+    draw();
+  }
+  function cleanup() {
+    cancelAnimationFrame(raf); clearTimeout(timer);
+    if (stream) stream.getTracks().forEach((t) => t.stop()); stream = null;
+    if (ctx) ctx.close().catch(() => {}); ctx = null; an = null;
+    bar.classList.add('hidden'); $('composer').classList.remove('recording'); active = false;
+    try { if (pid !== null) mic.releasePointerCapture(pid); } catch {} pid = null;
+  }
+  function stop(discard) {
+    if (!active) return;
+    const dur = (Date.now() - t0) / 1000; const r = rec; rec = null;
+    const lv = levels.slice();
+    if (!r || r.state === 'inactive') { cleanup(); return; }
+    r.onstop = async () => {
+      const blob = new Blob(chunks, { type: r.mimeType || mime || 'audio/webm' });
+      cleanup();
+      if (discard || dur < 0.8 || !blob.size) { if (!discard && dur < 0.8) toast('Hold the mic to record a voice message'); haptic(10); return; }
+      const data = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(blob); });
+      const n = 48, w = []; for (let i = 0; i < n; i++) { const a = Math.floor(i * lv.length / n), b = Math.max(a + 1, Math.floor((i + 1) * lv.length / n)); const seg = lv.slice(a, b); w.push(seg.length ? Math.round(Math.max(...seg) * 100) / 100 : 0.2); }
+      const peak = Math.max(0.15, ...w); const wave48 = w.map((v) => Math.round(Math.max(0.08, v / peak) * 100) / 100);
+      scrollNext = true; haptic(8);
+      const re = replyTo; replyTo = null; renderReplyBar();
+      try { const m = await app.sendMessage(app.openChat, { audio: { data, mime: blob.type, dur: Math.round(dur * 10) / 10, wave: wave48 }, replyTo: re }); if (m.status === 'failed') toast('Could not send: ' + (m.error || 'no relay reachable'), 'error'); }
+      catch (err) { toast(err.message, 'error'); }
+    };
+    try { r.stop(); } catch { cleanup(); }
+  }
+  mic.addEventListener('pointerdown', (e) => { if (e.button !== undefined && e.button !== 0) return; e.preventDefault(); start(e); });
+  mic.addEventListener('pointermove', (e) => { if (!active) return; const dx = e.clientX - sx; const c = dx < -80; if (c !== cancel) { cancel = c; bar.classList.toggle('cancel', c); $('rec-hint').textContent = c ? 'Release to cancel' : '‹ Slide to cancel'; if (c) haptic(10); } });
+  const up = () => { if (active) stop(cancel); };
+  mic.addEventListener('pointerup', up); mic.addEventListener('pointercancel', up);
+  mic.addEventListener('lostpointercapture', () => { if (active && rec) stop(cancel); });
+  mic.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); if (!active) start({ clientX: 0, pointerId: null }); else stop(false); } });
+})();
+/* ---- @mentions (groups) ---- */
+function hideMentions() { $('mention-pop').classList.add('hidden'); }
+function mentionCheck() {
+  const id = app && app.openChat; if (!id || !isGroupId(id) || !app.group(id)) { hideMentions(); return; }
+  const v = input.value.slice(0, input.selectionStart); const m = v.match(/(?:^|\s)@([^@\s]{0,20})$/);
+  if (!m) { hideMentions(); return; }
+  const q = m[1].toLowerCase();
+  const list = app.group(id).members.filter((pk) => pk !== app.pk && app.nameOf(pk).toLowerCase().startsWith(q)).slice(0, 6);
+  if (!list.length) { hideMentions(); return; }
+  const pop = $('mention-pop'); pop.classList.remove('hidden');
+  pop.innerHTML = list.map((pk) => `<button data-pk="${pk}">${avatarHtml(pk)}<span>${esc(app.nameOf(pk))}</span></button>`).join('');
+  pop.querySelectorAll('button').forEach((b) => { b.onmousedown = (e) => e.preventDefault(); b.onclick = () => {
+    const name = app.nameOf(b.dataset.pk); const before = input.value.slice(0, input.selectionStart).replace(/@[^@\s]*$/, '@' + name + ' '); const after = input.value.slice(input.selectionStart);
+    input.value = before + after; input.selectionStart = input.selectionEnd = before.length; autosize(); hideMentions(); input.focus();
+  }; });
 }
 async function sendSticker(sid) {
   const id = app.openChat; if (!id) return;
@@ -1486,16 +1827,89 @@ function renderPicker() {
 $('emoji-btn').onclick = () => { const p = $('picker'); p.classList.toggle('hidden'); if (!p.classList.contains('hidden')) renderPicker(); };
 
 /* chat menu */
+function chatCommonItems(id) {
+  const chat = app.store.chat(id);
+  return [
+    { id: 'search', label: 'Search in chat' },
+    { id: 'expire', label: `Disappearing messages · ${chat.expire ? app.expireLabel(chat.expire) : 'Off'}` },
+    { id: 'wall', label: 'Wallpaper & bubble color' },
+    { id: 'flags', label: `${chat.pin ? 'Unpin' : 'Pin'} · ${chat.mute ? 'Unmute' : 'Mute'} · ${chat.arch ? 'Unarchive' : 'Archive'}` },
+  ];
+}
+async function chatCommonAction(id, act) {
+  if (act === 'search') { openSearch(); return true; }
+  if (act === 'expire') { await expireSheet(id); return true; }
+  if (act === 'wall') { await wallSheet(id); return true; }
+  if (act === 'flags') { await chatListMenu(id); return true; }
+  return false;
+}
+async function expireSheet(id) {
+  const chat = app.store.chat(id); const cur = chat.expire || 0;
+  const labels = { 0: 'Off', 86400: '24 hours', [7 * 86400]: '7 days', [90 * 86400]: '90 days' };
+  const act = await menuSheet(EXPIRE_OPTIONS.map((sec) => ({ id: 'x' + sec, label: (cur === sec ? '✓ ' : '') + labels[sec] })));
+  if (!act) return;
+  const sec = Number(act.slice(1));
+  if (sec === cur) return;
+  app.setExpire(id, sec); renderedFor = null; renderChat();
+  toast(sec ? `New messages disappear after ${labels[sec]} on every device` : 'Disappearing messages off');
+}
+const WALLS = { '': 'Default', doodle: 'Doodle', sunset: 'Sunset', ocean: 'Ocean', forest: 'Forest', night: 'Night', candy: 'Candy' };
+const WALL_BG = { '': 'var(--bg3)', doodle: 'radial-gradient(circle at 1px 1px, #8884 1.5px, transparent 2px) 0 0 / 12px 12px, var(--bg3)', sunset: 'linear-gradient(160deg,#fb923c,#ec4899 55%,#6366f1)', ocean: 'linear-gradient(160deg,#0ea5e9,#6366f1 60%,#1e1b4b)', forest: 'linear-gradient(160deg,#16a34a,#0f766e 60%,#082f49)', night: 'radial-gradient(60px 40px at 20% 10%, #312e81, #0b1016 70%)', candy: 'linear-gradient(160deg,#f9a8d4,#c4b5fd 60%,#a5f3fc)' };
+const BUBBLES = { '': 'var(--accent)', purple: '#8b5cf6', green: '#22c55e', pink: '#ec4899', orange: '#f97316', teal: '#14b8a6', gray: '#64748b' };
+async function wallSheet(id) {
+  const chat = app.store.chat(id);
+  showModal(`<h3>Wallpaper</h3><div class="wall-pick">${Object.entries(WALLS).map(([k, n]) => `<button data-wall="${k}" class="${(chat.wall || '') === k ? 'on' : ''}" style="background:${WALL_BG[k]}">${n}</button>`).join('')}</div>
+    <h3>My bubble color</h3><div class="swatches">${Object.entries(BUBBLES).map(([k, c]) => `<button class="swatch ${(chat.bubble || '') === k ? 'active' : ''}" data-bubble="${k}" style="background:${c}"></button>`).join('')}</div>
+    <p class="tiny muted">Only on this device.</p><div class="row" style="justify-content:flex-end"><button class="btn primary small" id="w-ok">Done</button></div>`);
+  const body = $('modal-body');
+  body.querySelectorAll('[data-wall]').forEach((b) => { b.onclick = () => { if (b.dataset.wall) chat.wall = b.dataset.wall; else delete chat.wall; store.save(); body.querySelectorAll('[data-wall]').forEach((x) => x.classList.toggle('on', x === b)); renderChat(); haptic(); }; });
+  body.querySelectorAll('[data-bubble]').forEach((b) => { b.onclick = () => { if (b.dataset.bubble) chat.bubble = b.dataset.bubble; else delete chat.bubble; store.save(); body.querySelectorAll('[data-bubble]').forEach((x) => x.classList.toggle('active', x === b)); renderChat(); haptic(); }; });
+  $('w-ok').onclick = hideModal;
+}
+function createPollSheet(id) {
+  showModal(`<h3>New poll</h3><input type="text" id="poll-q" maxlength="200" placeholder="Ask a question"><div id="poll-opts">${[0, 1].map((i) => `<input type="text" class="poll-opt" maxlength="60" placeholder="Option ${i + 1}">`).join('')}</div>
+    <button class="btn ghost small" id="poll-add">+ Add option</button><div class="row" style="justify-content:flex-end"><button class="btn ghost" id="poll-no">Cancel</button><button class="btn primary" id="poll-ok">Send poll</button></div>`);
+  $('poll-add').onclick = () => { const n = $('poll-opts').children.length; if (n >= 8) return; const i = document.createElement('input'); i.type = 'text'; i.className = 'poll-opt'; i.maxLength = 60; i.placeholder = `Option ${n + 1}`; $('poll-opts').appendChild(i); i.focus(); };
+  $('poll-no').onclick = hideModal;
+  $('poll-ok').onclick = () => {
+    const q = $('poll-q').value.trim(); const opts = [...document.querySelectorAll('.poll-opt')].map((x) => x.value.trim()).filter(Boolean);
+    if (!q) { toast('Type a question', 'error'); return; }
+    if (opts.length < 2) { toast('Add at least two options', 'error'); return; }
+    hideModal(); scrollNext = true; app.createPoll(id, q, opts); renderedFor = null; renderChat(); haptic();
+  };
+}
+function shareLocation(id) {
+  if (!navigator.geolocation) { toast('Location is not available here', 'error'); return; }
+  toast('Getting your location…');
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    const lat = pos.coords.latitude.toFixed(5), lon = pos.coords.longitude.toFixed(5);
+    if (!await confirmSheet('Share your location?', `${lat}, ${lon} — sent encrypted to this chat only.`, 'Share', false)) return;
+    scrollNext = true;
+    await app.sendMessage(id, { text: `📍 My location https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=16/${lat}/${lon}` });
+  }, (err) => toast(err.code === 1 ? 'Location permission denied' : 'Could not get location', 'error'), { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 });
+}
+const EFFECTS = { confetti: '🎊 Confetti', hearts: '❤️ Hearts', balloons: '🎈 Balloons', fire: '🔥 Fire', stars: '✨ Stars', slam: '💥 Slam' };
+let pendingFx = '';
+function effectSheet() {
+  showModal(`<h3>Send with effect</h3><div class="fx-pick">${Object.entries(EFFECTS).map(([k, n]) => `<button data-fx="${k}"><b>${n.split(' ')[0]}</b>${n.split(' ')[1]}</button>`).join('')}</div><p class="tiny muted">The effect plays on both screens when the message arrives.</p>`);
+  $('modal-body').querySelectorAll('[data-fx]').forEach((b) => { b.onclick = () => { hideModal(); pendingFx = b.dataset.fx; haptic(); if (input.value.trim()) send(); else { toast(`Type a message — it will be sent with ${EFFECTS[pendingFx].split(' ')[1].toLowerCase()}`); input.focus(); } }; });
+}
+
 $('chat-menu-btn').onclick = async () => {
   const id = app.openChat;
   if (isGroupId(id)) {
     const g = app.group(id);
     const act = await menuSheet([
       ...(g ? [{ id: 'members', label: `Members (${g.members.length})` }, { id: 'add', label: 'Add members' }, { id: 'rename', label: 'Rename group' }] : []),
+      ...(g ? [{ id: 'photo', label: 'Group photo' }, { id: 'poll', label: 'Create poll' }] : []),
+      ...chatCommonItems(id),
       { id: 'clear', label: 'Clear chat on this device' },
       ...(g ? [{ id: 'leave', label: 'Leave group', danger: true }] : [{ id: 'remove', label: 'Delete this chat', danger: true }]),
     ]);
+    if (await chatCommonAction(id, act)) return;
     if (act === 'members') showMembers(gidOf(id));
+    else if (act === 'photo') pickGroupPhoto(gidOf(id));
+    else if (act === 'poll') createPollSheet(id);
     else if (act === 'add') pickFriends('Add members', g.members, (pks) => { app.addMembers(gidOf(id), pks); toast('Members added'); });
     else if (act === 'rename') { const v = await promptSheet('Group name', g.name, 'Name'); if (v) app.renameGroup(gidOf(id), v); }
     else if (act === 'clear') { if (await confirmSheet('Clear chat?', 'Removes this conversation from this device only.', 'Clear')) { app.clearChat(id); renderedFor = null; renderChat(); } }
@@ -1505,10 +1919,12 @@ $('chat-menu-btn').onclick = async () => {
   }
   const f = app.state.friends[id] || {};
   const act = await menuSheet([
+    ...chatCommonItems(id),
     { id: 'code', label: "Friend's code" }, { id: 'rename', label: 'Rename friend' }, { id: 'clear', label: 'Clear chat on this device' },
     f.status === 'blocked' ? { id: 'unblock', label: 'Unblock' } : { id: 'block', label: 'Block', danger: true },
     { id: 'remove', label: 'Remove friend', danger: true },
   ]);
+  if (await chatCommonAction(id, act)) return;
   if (act === 'code') { showModal(`<h3>${esc(app.nameOf(id))}</h3><div class="code">${friendCode(id)}</div><div class="row" style="justify-content:flex-end"><button class="btn primary small" id="m-ok">Close</button></div>`); $('m-ok').onclick = hideModal; }
   else if (act === 'rename') { const v = await promptSheet('Rename friend', f.name, 'Nickname'); if (v) { f.name = v; store.save(); } }
   else if (act === 'clear') { if (await confirmSheet('Clear chat?', 'Removes this conversation from this device only.', 'Clear')) { app.clearChat(id); renderedFor = null; renderChat(); } }
@@ -1530,6 +1946,9 @@ async function openPlus(id) {
     <button data-p="games"><span class="ic games"><svg viewBox="0 0 24 24"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3 3.5A1.5 1.5 0 1 0 8 9.5a1.5 1.5 0 0 0 0-3Zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Zm-4 4A1.5 1.5 0 1 0 12 13.5a1.5 1.5 0 0 0 0-3Zm-4 4A1.5 1.5 0 1 0 8 17.5a1.5 1.5 0 0 0 0-3Zm8 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z"/></svg></span>Games${active ? ` · ${active}` : ''}</button>
     <button data-p="watch"><span class="ic watch"><svg viewBox="0 0 24 24"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm6 4.5v7l6-3.5-6-3.5Z"/></svg></span>Watch reel</button>
     <button data-p="tv"><span class="ic tv"><svg viewBox="0 0 24 24"><path d="M3 6h18a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-6l1.5 2h-9L9 18H3a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1Zm1 2v8h16V8H4Zm6.2 1.4 4.6 2.6-4.6 2.6V9.4Z"/></svg></span>Live TV</button>
+    <button data-p="poll"><span class="ic poll" style="background:#f59e0b"><svg viewBox="0 0 24 24"><path d="M4 19h16v2H4zM6 10h3v7H6zm5-6h3v13h-3zm5 4h3v9h-3z"/></svg></span>Poll</button>
+    <button data-p="loc"><span class="ic loc" style="background:#22c55e"><svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></svg></span>Location</button>
+    <button data-p="fx"><span class="ic fx" style="background:#ec4899"><svg viewBox="0 0 24 24"><path d="m12 2 2.4 6.6L21 11l-6.6 2.4L12 20l-2.4-6.6L3 11l6.6-2.4Z"/></svg></span>Effects</button>
     <button data-p="music" ${group ? 'disabled' : ''} title="${group ? 'One-to-one chats only' : ''}"><span class="ic music">${live ? '<svg viewBox="0 0 24 24"><path d="M6 6h12v12H6z"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3Z"/></svg>'}</span>${live ? 'Stop sharing' : 'Listen together'}</button>
   </div>`);
   $('plus-btn').classList.add('open');
@@ -1546,6 +1965,9 @@ async function openPlus(id) {
       else if (p === 'watch') openWatch(id);
       else if (p === 'tv') openTV(id);
       else if (p === 'music') { if (live) share.stop(); else startShare(id); }
+      else if (p === 'poll') createPollSheet(id);
+      else if (p === 'loc') shareLocation(id);
+      else if (p === 'fx') effectSheet();
     };
   });
 }
@@ -2277,3 +2699,161 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.se
   $('auth').classList.remove('hidden');
   applyPendingRecover();
 })();
+
+
+/* ---------------- v8: starred, export/import, app lock ---------------- */
+function showStarred() {
+  const list = app.starred();
+  showModal(`<h3>Starred messages</h3>${list.length ? `<div class="pick-list starred-list">${list.map(({ chatId, m }) => `<div class="item" data-chat="${chatId}" data-mid="${m.id}">${avatarHtml(m.from)}<div class="body"><div class="top"><span class="name">${esc(m.from === app.pk ? 'You' : app.nameOf(m.from))} · ${esc(app.nameOf(chatId))}</span><span class="time">${fmtListTime(m.ts)}</span></div><div class="preview"><span>${esc(previewOf(m))}</span></div></div></div>`).join('')}</div>` : '<p class="muted">Long-press a message and tap Star to keep it here.</p>'}
+    <div class="row" style="justify-content:flex-end"><button class="btn primary small" id="st-ok">Close</button></div>`);
+  $('st-ok').onclick = hideModal;
+  $('modal-body').querySelectorAll('[data-mid]').forEach((it) => { it.onclick = () => { hideModal(); openChat(it.dataset.chat); setTimeout(() => { ensureVisible(it.dataset.mid); jumpTo(it.dataset.mid); }, 350); }; });
+}
+async function exportCipher(pass) {
+  const sk = await deriveSecretKey('chatly-export', pass);
+  return localCipher(sk);
+}
+async function exportChats() {
+  const pass = await promptSheet('Export passphrase', '', 'Choose a passphrase', 'Needed to import this file. It is not your account password.');
+  if (!pass) return; if (pass.length < 6) { toast('Use at least 6 characters', 'error'); return; }
+  toast('Preparing export…');
+  try {
+    const blobs = {};
+    for (const chat of Object.values(app.state.chats)) for (const m of chat.messages) if ((m.video || m.audio) && (m.video || m.audio).ready) { const d = await app.getVideo(m.id); if (d) blobs[m.id] = d; }
+    const payload = { v: 1, app: 'chatly', ts: Date.now(), pk: app.pk, profile: app.state.profile, friends: app.state.friends, groups: app.state.groups, chats: app.state.chats, calls: app.state.calls, blobs };
+    const c = await exportCipher(pass); const enc = await c.encrypt(payload);
+    const file = new Blob([new TextEncoder().encode('CHATLYX1'), enc], { type: 'application/octet-stream' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(file); a.download = `chatly-export-${new Date().toISOString().slice(0, 10)}.chatly`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    toast('Export saved');
+  } catch (e) { toast('Export failed: ' + e.message, 'error'); }
+}
+function importChats() {
+  const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.chatly,application/octet-stream';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    const pass = await promptSheet('Import passphrase', '', 'Passphrase used for the export'); if (!pass) return;
+    try {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      if (new TextDecoder().decode(buf.slice(0, 8)) !== 'CHATLYX1') throw new Error('Not a Chatly export file');
+      const c = await exportCipher(pass); const data = await c.decrypt(buf.slice(8));
+      if (!data || data.app !== 'chatly' || !data.chats) throw new Error('File is damaged');
+      if (data.pk && data.pk !== app.pk && !await confirmSheet('Different account', 'This export is from another account. Import its chats anyway?', 'Import', false)) return;
+      let added = 0;
+      for (const [cid, chat] of Object.entries(data.chats)) {
+        const mine = app.store.chat(cid); const have = new Set(mine.messages.map((m) => m.id));
+        for (const m of chat.messages || []) if (!have.has(m.id)) { mine.messages.push(m); added++; }
+        mine.messages.sort((a, b) => a.ts - b.ts); mine.lastTs = Math.max(mine.lastTs || 0, chat.lastTs || 0);
+        for (const k of ['pin', 'mute', 'arch', 'expire', 'wall', 'bubble', 'pinned']) if (chat[k] !== undefined && mine[k] === undefined) mine[k] = chat[k];
+      }
+      for (const [pk, fr] of Object.entries(data.friends || {})) if (!app.state.friends[pk]) app.state.friends[pk] = fr;
+      for (const [gid, g] of Object.entries(data.groups || {})) if (!app.state.groups[gid]) app.state.groups[gid] = g;
+      for (const [id, d] of Object.entries(data.blobs || {})) await store.putBlob(id, d);
+      store.save(); renderedFor = null; scheduleRender(); if (app.openChat) renderChat();
+      toast(`Imported ${added} message${added === 1 ? '' : 's'}`);
+    } catch (e) { toast(/decrypt|operation/i.test(e.message || '') ? 'Wrong passphrase' : 'Import failed: ' + e.message, 'error'); }
+  };
+  inp.click();
+}
+
+/* ---- app lock: PIN (hashed) + optional WebAuthn (Face ID / Touch ID) ---- */
+const lock = {
+  cfg() { try { return JSON.parse(localStorage.getItem('closechat:lock') || 'null') || null; } catch { return null; } },
+  save(c) { if (c) localStorage.setItem('closechat:lock', JSON.stringify(c)); else localStorage.removeItem('closechat:lock'); },
+  enabled() { return !!this.cfg(); },
+  bio() { const c = this.cfg(); return !!(c && c.cred); },
+  afterLabel() { const c = this.cfg() || {}; const m = c.after ?? 1; return m === 0 ? 'leaving the app' : m < 60 ? `${m} min away` : '1 hour away'; },
+  async hash(pin, salt) { const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pin)); return bytesToHex(new Uint8Array(d)); },
+  locked: false, hiddenAt: 0,
+};
+async function lockSettings() {
+  const c = lock.cfg();
+  if (!c) {
+    const pin = await pinEntry('Choose a 4–6 digit PIN'); if (!pin) return;
+    const pin2 = await pinEntry('Repeat the PIN'); if (pin2 !== pin) { toast('PINs did not match', 'error'); return; }
+    const salt = bytesToHex(crypto.getRandomValues(new Uint8Array(8)));
+    lock.save({ salt, hash: await lock.hash(pin, salt), after: 1 });
+    toast('App lock on'); renderSettings();
+    if (window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(() => false)) {
+      if (await confirmSheet('Use Face ID / Touch ID?', 'Unlock with your device biometrics instead of typing the PIN.', 'Enable', false)) await enrollBio();
+    }
+    return;
+  }
+  const act = await menuSheet([
+    { id: 'after', label: `Auto-lock · ${lock.afterLabel()}` },
+    ...(window.PublicKeyCredential ? [{ id: 'bio', label: c.cred ? 'Turn off Face ID / Touch ID' : 'Use Face ID / Touch ID' }] : []),
+    { id: 'pin', label: 'Change PIN' },
+    { id: 'off', label: 'Turn off app lock', danger: true },
+  ]);
+  if (act === 'after') {
+    const a = await menuSheet([[0, 'Immediately'], [1, 'After 1 minute'], [5, 'After 5 minutes'], [15, 'After 15 minutes'], [60, 'After 1 hour']].map(([m, l]) => ({ id: String(m), label: (c.after === m ? '✓ ' : '') + l })));
+    if (a !== null && a !== undefined && a !== '') { c.after = Number(a); lock.save(c); }
+  } else if (act === 'bio') { if (c.cred) { delete c.cred; lock.save(c); toast('Face ID / Touch ID off'); } else await enrollBio(); }
+  else if (act === 'pin') { if (!await verifyPin('Current PIN')) return; const pin = await pinEntry('New PIN'); if (!pin) return; c.hash = await lock.hash(pin, c.salt); lock.save(c); toast('PIN changed'); }
+  else if (act === 'off') { if (await verifyPin('Enter PIN to turn off')) { lock.save(null); toast('App lock off'); } }
+  renderSettings();
+}
+async function enrollBio() {
+  try {
+    const cred = await navigator.credentials.create({ publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: 'Chatly', id: location.hostname },
+      user: { id: new TextEncoder().encode(app.pk.slice(0, 32)), name: app.state.profile.username || 'chatly', displayName: app.state.profile.name || 'Chatly' },
+      pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+      authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'preferred' }, timeout: 60000,
+    } });
+    const c = lock.cfg(); c.cred = bytesToHex(new Uint8Array(cred.rawId)); lock.save(c); toast('Face ID / Touch ID enabled');
+  } catch (e) { toast('Could not enable biometrics here', 'error'); }
+  renderSettings();
+}
+async function bioUnlock() {
+  const c = lock.cfg(); if (!c || !c.cred) return false;
+  try {
+    await navigator.credentials.get({ publicKey: { challenge: crypto.getRandomValues(new Uint8Array(32)), rpId: location.hostname, allowCredentials: [{ type: 'public-key', id: hexToBytes(c.cred) }], userVerification: 'required', timeout: 60000 } });
+    return true;
+  } catch { return false; }
+}
+function pinEntry(title, verify = null) {
+  return new Promise((res) => {
+    showModal(`<h3>${esc(title)}</h3><div class="pin-dots" id="m-dots"></div><div class="pin-pad" id="m-pad"></div><div class="row" style="justify-content:flex-end"><button class="btn ghost small" id="m-cancel">Cancel</button></div>`);
+    let pin = '';
+    const dots = $('m-dots'); const draw = () => { dots.innerHTML = Array.from({ length: Math.max(4, pin.length) }, (_, i) => `<i class="${i < pin.length ? 'on' : ''}"></i>`).join(''); };
+    draw();
+    $('m-pad').innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9, 'ok', 0, '⌫'].map((k) => `<button data-k="${k}" class="${k === 'ok' ? 'ghost' : ''}">${k === 'ok' ? 'OK' : k}</button>`).join('');
+    const done = async () => {
+      if (pin.length < 4) { toast('PIN needs 4–6 digits', 'error'); return; }
+      if (verify && !await verify(pin)) { dots.classList.add('shake'); haptic(40); setTimeout(() => dots.classList.remove('shake'), 400); pin = ''; draw(); return; }
+      hideModal(); res(pin);
+    };
+    $('m-pad').querySelectorAll('button').forEach((b) => { b.onclick = () => { const k = b.dataset.k; haptic(6); if (k === '⌫') pin = pin.slice(0, -1); else if (k === 'ok') { done(); return; } else if (pin.length < 6) pin += k; draw(); if (pin.length === 6) done(); }; });
+    $('m-cancel').onclick = () => { hideModal(); res(null); };
+  });
+}
+async function verifyPin(title) {
+  const c = lock.cfg(); if (!c) return true;
+  const pin = await pinEntry(title, async (p) => (await lock.hash(p, c.salt)) === c.hash);
+  return !!pin;
+}
+function showLock() {
+  const c = lock.cfg(); if (!c || lock.locked) return;
+  lock.locked = true; document.body.classList.add('privacy');
+  const el = $('lock'); el.classList.remove('hidden');
+  $('lock-sub').textContent = 'Enter your PIN';
+  let pin = ''; const dots = $('pin-dots');
+  const draw = () => { dots.innerHTML = Array.from({ length: Math.max(4, pin.length) }, (_, i) => `<i class="${i < pin.length ? 'on' : ''}"></i>`).join(''); };
+  draw();
+  const unlock = () => { lock.locked = false; el.classList.add('hidden'); document.body.classList.remove('privacy'); haptic(10); };
+  const tryPin = async () => { if ((await lock.hash(pin, c.salt)) === c.hash) unlock(); else { dots.classList.add('shake'); haptic(40); $('lock-sub').textContent = 'Wrong PIN'; setTimeout(() => dots.classList.remove('shake'), 400); pin = ''; draw(); } };
+  $('pin-pad').innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9, 'ok', 0, '⌫'].map((k) => `<button data-k="${k}" class="${k === 'ok' ? 'ghost' : ''}">${k === 'ok' ? 'OK' : k}</button>`).join('');
+  $('pin-pad').querySelectorAll('button').forEach((b) => { b.onclick = () => { const k = b.dataset.k; haptic(6); if (k === '⌫') pin = pin.slice(0, -1); else if (k === 'ok') { if (pin.length >= 4) tryPin(); return; } else if (pin.length < 6) pin += k; draw(); if (pin.length === 6) tryPin(); }; });
+  const bio = $('lock-bio'); bio.classList.toggle('hidden', !c.cred);
+  bio.onclick = async () => { if (await bioUnlock()) unlock(); else $('lock-sub').textContent = 'Biometrics failed — use your PIN'; };
+  if (c.cred && !document.hidden) setTimeout(() => bio.click(), 300);
+}
+document.addEventListener('visibilitychange', () => {
+  const c = lock.cfg(); if (!c || !app) return;
+  if (document.hidden) { lock.hiddenAt = Date.now(); document.body.classList.add('privacy'); return; }
+  const away = Date.now() - (lock.hiddenAt || 0);
+  if (lock.locked) return;
+  if ((c.after ?? 1) * 60000 <= away) showLock(); else document.body.classList.remove('privacy');
+});
+window.addEventListener('chatly:ready', () => { if (lock.cfg()) showLock(); });
