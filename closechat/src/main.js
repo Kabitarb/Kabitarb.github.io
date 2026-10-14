@@ -2384,6 +2384,21 @@ function gameActive() { const p = $('game'); p.classList.remove('idle'); clearTi
 $('game').addEventListener('pointerdown', (e) => { gameActive(); const p = $('game'); if (!p.classList.contains('full') || e.target.closest('button')) return; const band = 56 + (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0); gameSwipe = e.clientY - p.getBoundingClientRect().top < band ? { y: e.clientY, x: e.clientX } : null; }, { passive: true });
 $('game').addEventListener('pointermove', (e) => { if (!gameSwipe) return; if (e.clientY - gameSwipe.y > 70 && Math.abs(e.clientX - gameSwipe.x) < 60) { gameSwipe = null; setGameMini(true); } }, { passive: true });
 $('game').addEventListener('pointerup', () => { gameSwipe = null; }, { passive: true });
+// Touch: cancel the browser's own pan on the first move so the swipe isn't turned into a pointercancel.
+$('game').addEventListener('touchstart', (e) => {
+  const p = $('game');
+  if (!p.classList.contains('full') || e.target.closest('button') || e.touches.length !== 1) return;
+  const t = e.touches[0];
+  const band = 56 + (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0);
+  gameSwipe = t.clientY - p.getBoundingClientRect().top < band ? { y: t.clientY, x: t.clientX, touch: true } : null;
+}, { passive: true });
+$('game').addEventListener('touchmove', (e) => {
+  if (!gameSwipe || !gameSwipe.touch) return;
+  const t = e.touches[0]; const dx = t.clientX - gameSwipe.x, dy = t.clientY - gameSwipe.y;
+  if (dy > 8 && Math.abs(dx) < dy && e.cancelable) e.preventDefault();
+  if (dy > 70 && Math.abs(dx) < 60) { gameSwipe = null; setGameMini(true); }
+}, { passive: false });
+$('game').addEventListener('touchend', () => { gameSwipe = null; }, { passive: true });
 $('game').addEventListener('keydown', gameActive);
 $('game-mini-bar').onclick = (e) => { if (!e.target.closest('#game-mini-leave')) setGameMini(false); };
 async function leaveGame() {
@@ -2412,8 +2427,9 @@ function renderArcade() {
   const a = arcadeOpen; if (!a) return; const A = ARCADE[a.id]; const panel = $('game'), body = $('game-body');
   $('game-title').textContent = `${A.icon} ${A.name}`; $('game-quit').textContent = 'Close'; $('game-mini-leave').textContent = 'Close';
   $('game-mini-icon').textContent = A.icon; $('game-mini-title').textContent = A.name; $('game-mini-sub').textContent = a.score !== null ? `Score ${a.score} · tap to return` : 'Playing · tap to return';
+  const wasFull = panel.classList.contains('full');
   panel.dataset.game = 'arcade:' + a.id; panel.classList.add('arcade'); panel.classList.toggle('mini', gameMini); panel.classList.toggle('full', !gameMini); panel.classList.remove('turn');
-  if (!gameMini) gameActive();
+  if (!gameMini && !wasFull) gameActive(); else if (gameMini) { panel.classList.remove('idle'); clearTimeout(gameIdleT); }
   if (!body.querySelector('.arcade')) {
     body.innerHTML = `<div class="arcade"><iframe id="arcade-frame" title="${esc(A.name)}" src="arcade/${a.id}/index.html" sandbox="allow-scripts allow-same-origin" allow="autoplay" loading="eager"></iframe>
       <div class="arcade-over hidden" id="arcade-over"></div></div>`;
@@ -2421,6 +2437,7 @@ function renderArcade() {
 }
 window.addEventListener('message', (e) => {
   const d = e.data; if (!arcadeOpen || !d || d.chatlyArcade !== arcadeOpen.id) return;
+  if (d.type === 'active') { if (!gameMini) gameActive(); return; }
   if (d.type !== 'over') return;
   const A = ARCADE[arcadeOpen.id], score = Math.max(0, Math.round(Number(d.score) || 0)); const r = recordScore(arcadeOpen.id, score); arcadeOpen.score = score;
   const ov = $('arcade-over'); if (!ov) return;

@@ -1501,3 +1501,5 @@ body.call-mini-voice #game.full .game-body { padding-top: calc(112px + var(--saf
 .arcade-ic { font-size: 44px; line-height: 1; }
 .arcade-score { font-size: 44px; font-weight: 800; letter-spacing: -1px; }
 .arcade-btns { display: flex; gap: 10px; margin: 10px 0 6px; }
+#game.mini.arcade .game-body, #game.mini.arcade .arcade { display: none; }
+#game.full .game-body { padding-left: 4px; padding-right: 4px; }

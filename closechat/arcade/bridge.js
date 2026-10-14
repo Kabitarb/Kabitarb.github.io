@@ -51,5 +51,8 @@
     document.addEventListener('touchend', function () { if (!moved) { key(78, 'n'); reset(); } });
     document.addEventListener('keydown', function (e) { if (e.keyCode === 78) reset(); });
   }
+  var lastAct = 0;
+  function act() { var n = Date.now(); if (n - lastAct > 400) { lastAct = n; post('active'); } }
+  document.addEventListener('touchstart', act, { passive: true }); document.addEventListener('pointerdown', act, { passive: true }); document.addEventListener('keydown', act);
   post('ready');
 })();
