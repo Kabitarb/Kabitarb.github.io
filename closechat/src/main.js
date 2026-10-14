@@ -627,7 +627,7 @@ function renderChatList() {
     const t = typingState[id];
     if (t) preview = `<i>${isGroupId(id) ? esc(app.nameOf(t.pk)) + ' is ' : ''}typing…</i>`; else preview = esc(preview);
     const unread = chat.unread || (chat.markUnread ? '•' : 0);
-    const ring = !isGroupId(id) && app.isOnline(id) ? 'on' : unread ? 'new' : '';
+    const ring = unread ? 'new' : !isGroupId(id) && app.isOnline(id) ? 'on' : '';
     return `<div class="item ${unread ? 'unread-item' : ''} ${chat.mute ? 'muted' : ''} ${app.openChat === id ? 'active' : ''}" data-id="${id}"><div class="inner">
       <span class="av-ring ${ring}">${avatarHtml(id)}</span>
       <div class="body"><div class="top"><span class="name">${esc(app.nameOf(id))}<span class="flags">${chat.pin ? '📌' : ''}${chat.mute ? '🔕' : ''}${chat.expire ? '⏱' : ''}</span></span>${pending ? '<span class="pend">Request sent</span>' : `<span class="time">${fmtListTime(chat.lastTs)}</span>`}</div>
@@ -2838,6 +2838,7 @@ function renderGrid(info) {
     const v = el.querySelector('video');
     if (t.stream && v.srcObject !== t.stream) { v.srcObject = t.stream; v.play().catch(() => {}); }
     v.classList.toggle('hidden', !(t.video && t.stream));
+    el.classList.toggle('vid', !!(t.video && t.stream));
     el.classList.toggle('waiting', !t.connected && !t.me);
     el.classList.toggle('speaking', !!t.speaking);
     el.querySelector('.ctag').innerHTML = `${t.muted ? MUTED_SVG : ''}<b>${t.me ? 'You' : esc(app.nameOf(t.pk))}</b>`;

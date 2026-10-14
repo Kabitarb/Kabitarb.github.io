@@ -92,6 +92,9 @@ export class GroupCallManager extends EventTarget {
         else if (p) this.signal(from, { a: 'roster', peers: [...this.peers.keys()] }).catch(() => {});
         break;
       case 'offer': {
+        // Glare: both sides offered at once (two members accepted together). The higher key keeps its own offer and
+        // ignores the incoming one; the lower key drops its offer and answers, so exactly one session survives.
+        if (p && p.pc.signalingState === 'have-local-offer' && this.app.pk > from) break;
         if (p) { try { p.pc.close(); } catch {} this.peers.delete(from); }
         const peer = this.createPeer(from, !!c.video);
         try {

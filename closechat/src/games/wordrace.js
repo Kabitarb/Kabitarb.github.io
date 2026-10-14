@@ -47,7 +47,7 @@ export function view(ctx) {
   return {
     mount(host) {
       el = host;
-      iv = setInterval(() => { if (!s0 || !el) return; const st = s0.state; const left = Math.max(0, Math.ceil((st.endsAt - Date.now()) / 1000)); const t = el.querySelector('#wr-time'); if (t) { t.textContent = `0:${String(left).padStart(2, '0')}`; t.classList.toggle('low', left <= 10); } if (!st.done && Date.now() > st.endsAt && !endSent) { endSent = true; ctx.move({ a: 'end' }); } }, 500);
+      iv = setInterval(() => { if (!s0 || !el) return; const st = s0.state; const left = Math.max(0, Math.ceil((st.endsAt - Date.now()) / 1000)); const t = el.querySelector('#wr-time'); if (t) { t.textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`; t.classList.toggle('low', left <= 10); } if (!st.done && Date.now() > st.endsAt && !endSent) { endSent = true; ctx.move({ a: 'end' }); } }, 500);
     },
     update(s) {
       s0 = s; const st = s.state, me = ctx.my, op = 1 - me, over = engine.over(st);
@@ -55,7 +55,7 @@ export function view(ctx) {
       const w = word(), lw = w.toLowerCase(), valid = lw.length >= 3 && isWord(lw) && !st.found[me].includes(lw), dup = st.found[me].includes(lw);
       const mine = st.found[me].slice().reverse(), theirs = st.found[op];
       el.innerHTML = `${scoreStrip(ctx, s, over)}
-        <div class="d2-top"><span class="d2-score me">You <b>${st.scores[me]}</b></span><span class="d2-time ${left <= 10 ? 'low' : ''}" id="wr-time">0:${String(left).padStart(2, '0')}</span><span class="d2-score">${esc(ctx.nameOf(s.players[op]))} <b>${st.scores[op]}</b></span></div>
+        <div class="d2-top"><span class="d2-score me">You <b>${st.scores[me]}</b></span><span class="d2-time ${left <= 10 ? 'low' : ''}" id="wr-time">${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}</span><span class="d2-score">${esc(ctx.nameOf(s.players[op]))} <b>${st.scores[op]}</b></span></div>
         <div class="wr-word ${valid ? 'ok' : dup ? 'dup' : ''} ${flash}">${w ? esc(w) : '<span class="muted">Tap letters to build a word</span>'}${valid ? `<small>+${points(lw)}</small>` : ''}</div>
         <div class="wr-grid ${over ? 'over' : ''}">${st.grid.map((ch, i) => { const k = path.indexOf(i); return `<button class="wr-cell ${k >= 0 ? 'sel' : ''} ${k === path.length - 1 ? 'head' : ''}" data-i="${i}" ${over ? 'disabled' : ''}>${ch}${k >= 0 ? `<i>${k + 1}</i>` : ''}</button>`; }).join('')}</div>
         <div class="wr-actions"><button class="btn ghost small" id="wr-clear" ${path.length ? '' : 'disabled'}>Clear</button><button class="btn primary small" id="wr-ok" ${valid && !over ? '' : 'disabled'}>Add word</button></div>
