@@ -1569,3 +1569,5 @@ body.call-mini-voice #game.full .game-body { padding-top: calc(112px + var(--saf
 .piece-row button svg, .lp-piece svg { display: block; filter: drop-shadow(0 1px 1px rgba(0,0,0,.35)); }
 .piece-row button { display: grid; place-items: center; }
 .ludo .tok .piece, .snl .tok .piece { filter: drop-shadow(0 1.5px 1px rgba(0,0,0,.35)); }
+
+.steps { text-align: left; padding-left: 20px; margin: 10px 0 14px; } .steps li { margin: 8px 0; line-height: 1.45; } .steps code { user-select: all; background: rgba(127,127,127,.18); padding: 2px 7px; border-radius: 7px; font-size: 13px; } .lp-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
