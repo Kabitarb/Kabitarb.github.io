@@ -1395,3 +1395,33 @@ button, .icon-btn { -webkit-touch-callout: none; }
 .wr-found b { display: block; color: var(--fg); margin-bottom: 2px; }
 .wr-found span { display: inline-block; margin: 1px 4px 1px 0; padding: 1px 6px; border-radius: 6px; background: var(--bg2); }
 #game.full .d2-board.big { width: min(86vw, 44dvh, 380px); }
+
+/* ---- v10 UI: status rings, message preview, tab transitions, picker/result polish ---- */
+.av-ring { display: inline-flex; flex: none; border-radius: 50%; padding: 2px; border: 2px solid transparent; transition: border-color .3s, box-shadow .3s; }
+.av-ring.on { border-color: transparent; background: linear-gradient(var(--bg), var(--bg)) padding-box, linear-gradient(135deg, #22c55e, #10b981, #34d399) border-box; }
+.av-ring.new { background: linear-gradient(var(--bg), var(--bg)) padding-box, linear-gradient(135deg, var(--accent), #a855f7) border-box; }
+.av-ring:not(.on):not(.new) { border-color: transparent; }
+#chat-list .item .av-ring .avatar { width: 48px; height: 48px; font-size: 18px; }
+.mm-preview { display: flex; margin: 2px 0 12px; pointer-events: none; animation: popin .35s var(--spring); }
+.mm-preview.out { justify-content: flex-end; }
+.mm-preview .bubble { max-width: 85%; max-height: 180px; overflow: hidden; }
+.mm-preview.out .bubble { background: var(--accent); color: #fff; }
+.mm-preview.in .bubble { background: var(--bg3); }
+.mm-preview .bubble img, .mm-preview .bubble video { max-height: 150px; }
+.tab-pane.enter-r { animation: paneR .34s var(--ios); }
+.tab-pane.enter-l { animation: paneL .34s var(--ios); }
+@keyframes paneR { from { transform: translateX(26px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes paneL { from { transform: translateX(-26px); opacity: 0; } to { transform: none; opacity: 1; } }
+.gpick .gtile { animation: tilein .45s var(--spring) both; animation-delay: calc(var(--i, 0) * 45ms); }
+@keyframes tilein { from { transform: translateY(16px) scale(.96); opacity: 0; } to { transform: none; opacity: 1; } }
+.gpick .gtile:hover { transform: translateY(-2px); box-shadow: 0 8px 24px color-mix(in srgb, var(--gc, var(--accent)) 30%, transparent); }
+.gpick .gtile:active { transform: scale(.97); }
+.g-result-card { position: relative; overflow: hidden; }
+.g-result-card::before { content: ''; position: absolute; inset: -40% -20% auto; height: 70%; background: radial-gradient(ellipse at top, color-mix(in srgb, var(--accent) 35%, transparent), transparent 70%); pointer-events: none; }
+.g-result-card.won::before { background: radial-gradient(ellipse at top, rgba(250,204,21,.45), transparent 70%); }
+.g-result-card.lost::before { background: radial-gradient(ellipse at top, rgba(148,163,184,.3), transparent 70%); }
+.g-result-card .g-trophy { font-size: 56px; line-height: 1; animation: trophy .9s var(--spring); position: relative; }
+.g-result-card.won .g-trophy { filter: drop-shadow(0 6px 18px rgba(250,204,21,.6)); }
+@keyframes trophy { 0% { transform: scale(.3) rotate(-20deg); opacity: 0; } 60% { transform: scale(1.15) rotate(6deg); opacity: 1; } 100% { transform: none; } }
+.g-result-card h3 { position: relative; }
+@media (prefers-reduced-motion: reduce) { .gpick .gtile, .tab-pane.enter-r, .tab-pane.enter-l, .g-result-card .g-trophy, .mm-preview { animation: none; } }

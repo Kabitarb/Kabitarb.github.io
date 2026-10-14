@@ -627,8 +627,9 @@ function renderChatList() {
     const t = typingState[id];
     if (t) preview = `<i>${isGroupId(id) ? esc(app.nameOf(t.pk)) + ' is ' : ''}typing…</i>`; else preview = esc(preview);
     const unread = chat.unread || (chat.markUnread ? '•' : 0);
+    const ring = !isGroupId(id) && app.isOnline(id) ? 'on' : unread ? 'new' : '';
     return `<div class="item ${unread ? 'unread-item' : ''} ${chat.mute ? 'muted' : ''} ${app.openChat === id ? 'active' : ''}" data-id="${id}"><div class="inner">
-      ${avatarHtml(id)}
+      <span class="av-ring ${ring}">${avatarHtml(id)}</span>
       <div class="body"><div class="top"><span class="name">${esc(app.nameOf(id))}<span class="flags">${chat.pin ? '📌' : ''}${chat.mute ? '🔕' : ''}${chat.expire ? '⏱' : ''}</span></span>${pending ? '<span class="pend">Request sent</span>' : `<span class="time">${fmtListTime(chat.lastTs)}</span>`}</div>
       <div class="preview"><span>${preview}</span>${unread ? `<span class="unread">${unread}</span>` : ''}</div></div></div>
       <div class="acts"><button class="a-pin" data-act="pin"><span>📌</span>${chat.pin ? 'Unpin' : 'Pin'}</button><button class="a-mute" data-act="mute"><span>${chat.mute ? '🔔' : '🔕'}</span>${chat.mute ? 'Unmute' : 'Mute'}</button><button class="a-arch" data-act="arch"><span>🗄️</span>${chat.arch ? 'Unarchive' : 'Archive'}</button><button class="a-unread" data-act="unread"><span>${chat.unread || chat.markUnread ? '✉️' : '🔵'}</span>${chat.unread || chat.markUnread ? 'Read' : 'Unread'}</button></div></div>`;
@@ -1127,13 +1128,15 @@ async function squareAvatar(file) {
 function loadImage(file) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); }); }
 
 /* ---------------- tabs ---------------- */
+let prevTab = 'chats';
 document.querySelectorAll('.tabbar button').forEach((b) => {
   b.onclick = () => {
     if (currentTab !== b.dataset.tab) { b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); haptic(6); }
     currentTab = b.dataset.tab;
     document.querySelector('.side-body').scrollTop = 0; $('side').classList.remove('compact');
     document.querySelectorAll('.tabbar button').forEach((x) => x.classList.toggle('active', x === b));
-    document.querySelectorAll('.tab-pane').forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== currentTab));
+    const order = ['chats', 'friends', 'calls', 'requests', 'settings']; const dir = order.indexOf(currentTab) >= order.indexOf(prevTab) ? 'enter-r' : 'enter-l'; prevTab = currentTab;
+    document.querySelectorAll('.tab-pane').forEach((p) => { const show = p.dataset.pane === currentTab; p.classList.toggle('hidden', !show); p.classList.remove('enter-r', 'enter-l'); if (show && !reducedMotion()) { void p.offsetWidth; p.classList.add(dir); } });
     $('side-title').textContent = { chats: 'Chats', friends: 'Friends', calls: 'Calls', requests: 'Requests', settings: 'Settings' }[currentTab];
     $('fab-new').classList.toggle('hidden', currentTab !== 'chats');
   };
@@ -1615,9 +1618,18 @@ $('reply-cancel').onclick = () => { replyTo = null; renderReplyBar(); };
   }, { passive: false });
 })();
 
+function addMsgPreview(mid, tries = 0) {
+  const sheet = document.querySelector('#modal:not(.hidden) .sheet'); const src = document.querySelector(`.msg[data-id="${mid}"] .bubble`);
+  if (!sheet) { if (tries < 10) setTimeout(() => addMsgPreview(mid, tries + 1), 30); return; }
+  if (!src || sheet.querySelector('.mm-preview')) return;
+  const wrap = document.createElement('div'); wrap.className = 'mm-preview ' + (src.closest('.msg').classList.contains('out') ? 'out' : 'in');
+  const clone = src.cloneNode(true); clone.querySelectorAll('video, audio').forEach((v) => { v.controls = false; v.autoplay = false; }); wrap.appendChild(clone);
+  sheet.insertBefore(wrap, sheet.firstChild);
+}
 async function messageMenu(mid) {
   const id = app.openChat; const chat = app.store.chat(id);
   const m = chat.messages.find((x) => x.id === mid); if (!m) return;
+  haptic(8); setTimeout(() => addMsgPreview(mid), 0);
   const items = [{ id: 'reply', label: 'Reply' }];
   if (m.kind === 'text' && !m.deleted) items.push({ id: 'copy', label: 'Copy text' });
   if (!m.deleted && ['text', 'image', 'sticker', 'video', 'audio'].includes(m.kind)) items.push({ id: 'forward', label: 'Forward' });
@@ -2044,7 +2056,7 @@ async function openGames(id) {
   const active = games.forChat(id);
   showModal(`<h3>Games</h3><div class="menu gpick">
     ${active.map((s) => `<button class="gactive" data-mi="g:${s.id}"><span class="gicon">${GAMES[s.type].icon}</span><b>${s.status === 'lobby' ? 'Join' : 'Open'} ${esc(GAMES[s.type].name)}</b><small>${s.players.length} player${s.players.length === 1 ? '' : 's'} · ${s.status === 'lobby' ? 'in lobby' : 'playing'}</small></button>`).join('')}
-    ${GAME_ORDER.map((t) => `<button class="gtile" data-mi="${t}" style="--gc:${GAMES[t].color}"><span class="gicon">${GAMES[t].icon}</span>${GAMES[t].isNew ? '<em class="gnew">NEW</em>' : ''}<b>${esc(GAMES[t].name)}</b><small>${esc(GAMES[t].blurb)}</small></button>`).join('')}</div>${leaderboardHtml(id)}`);
+    ${GAME_ORDER.map((t, i) => `<button class="gtile" data-mi="${t}" style="--gc:${GAMES[t].color};--i:${i}"><span class="gicon">${GAMES[t].icon}</span>${GAMES[t].isNew ? '<em class="gnew">NEW</em>' : ''}<b>${esc(GAMES[t].name)}</b><small>${esc(GAMES[t].blurb)}</small></button>`).join('')}</div>${leaderboardHtml(id)}`);
   $('modal-body').querySelectorAll('[data-mi]').forEach((b) => { b.onclick = () => {
     const act = b.dataset.mi; hideModal(); haptic();
     if (act.startsWith('g:')) openGame(act.slice(2));
@@ -2427,7 +2439,7 @@ function renderGame() {
   if (over) {
     const st = s.state, w = st.winner, won = w === my, draw = w === null || w === undefined || w < 0, sw = games.seriesWinner(s), seriesOver = sw >= 0;
     if (!ov) { ov = document.createElement('div'); ov.className = 'g-result'; body.appendChild(ov); }
-    ov.innerHTML = `<div class="g-result-card"><div class="g-trophy">${draw ? '🤝' : won ? '🏆' : '😮'}</div><h3>${seriesOver ? (sw === my ? 'You win the match!' : esc(app.nameOf(s.players[sw])) + ' wins the match') : draw ? "It's a draw" : won ? 'You win!' : esc(app.nameOf(s.players[w])) + ' wins'}</h3>
+    ov.innerHTML = `<div class="g-result-card ${draw ? 'draw' : won ? 'won' : 'lost'}"><div class="g-trophy">${draw ? '🤝' : won ? '🏆' : '😮'}</div><h3>${seriesOver ? (sw === my ? 'You win the match!' : esc(app.nameOf(s.players[sw])) + ' wins the match') : draw ? "It's a draw" : won ? 'You win!' : esc(app.nameOf(s.players[w])) + ' wins'}</h3>
       ${st.score ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(p === app.pk ? 'You' : app.nameOf(p))} <b>${st.score[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : st.scores ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(p === app.pk ? 'You' : app.nameOf(p))} <b>${st.scores[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : ''}
       ${!draw && (games.stats(s.chatId)[s.players[w]]?.streak || 0) >= 2 ? `<div class="g-streak">🔥 ${games.stats(s.chatId)[s.players[w]].streak} wins in a row</div>` : ''}
       <div class="g-result-actions"><button class="btn ghost" id="g-result-look">Look at board</button><button class="btn primary" data-game-act="again">${seriesOver ? 'New match' : 'Rematch'}</button></div>
