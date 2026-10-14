@@ -1503,3 +1503,25 @@ body.call-mini-voice #game.full .game-body { padding-top: calc(112px + var(--saf
 .arcade-btns { display: flex; gap: 10px; margin: 10px 0 6px; }
 #game.mini.arcade .game-body, #game.mini.arcade .arcade { display: none; }
 #game.full .game-body { padding-left: 4px; padding-right: 4px; }
+
+/* v12 Ludo: names in base corners, piece glyphs, realistic dice */
+.ludo .lname rect { fill: rgba(255,255,255,.94); stroke: var(--c); stroke-width: 2; }
+.ludo .lname text { fill: #1f2937; }
+.ludo .lname.turn rect { fill: var(--c); animation: lnamePulse 1.2s ease-in-out infinite; }
+.ludo .lname.turn text { fill: #fff; }
+.ludo .tok text { pointer-events: none; user-select: none; }
+.ludo .tok { transition: transform .35s var(--ios); }
+@keyframes lnamePulse { 0%, 100% { filter: drop-shadow(0 0 0 transparent); } 50% { filter: drop-shadow(0 0 10px var(--c)); } }
+.dice { width: 72px; height: 72px; perspective: 320px; }
+.dice .cube { inset: 12px; transition: transform .9s cubic-bezier(.22,1.2,.36,1); }
+.dice.rolling .cube { animation: tumble3 1.1s cubic-bezier(.17,.67,.3,1) both; }
+@keyframes tumble3 {
+  0% { transform: translateY(0) rotateX(0) rotateY(0) rotateZ(0); }
+  20% { transform: translateY(-26px) rotateX(200deg) rotateY(140deg) rotateZ(40deg); }
+  45% { transform: translateY(2px) rotateX(420deg) rotateY(330deg) rotateZ(90deg); }
+  60% { transform: translateY(-10px) rotateX(540deg) rotateY(410deg) rotateZ(120deg); }
+  75% { transform: translateY(0) rotateX(690deg) rotateY(520deg) rotateZ(170deg); }
+  88% { transform: translateY(-3px) rotateX(715deg) rotateY(560deg) rotateZ(178deg); }
+  100% { transform: translateY(0) rotateX(708deg) rotateY(550deg) rotateZ(180deg); }
+}
+#game.full .g-ludo .ludo-bar { width: 100%; justify-content: center; }
