@@ -37,7 +37,7 @@ export class App extends EventTarget {
     this.openChat = null;
     this.visible = true;
     this.typingSent = {};
-    this.callHandler = null;
+    this.callHandler = null; this.groupCallHandler = null;
     this.gameHandler = null;
     this.watchHandler = null;
     this.shareHandler = null;
@@ -578,6 +578,12 @@ export class App extends EventTarget {
         if (!this.isFriend(from) || ageSec > 90) return;
         if (this.callHandler) this.callHandler(from, c, rumor);
         break;
+      case 'gcall': {
+        const g = c.gid && this.group(c.gid);
+        if (!g || !g.members.includes(from) || !g.members.includes(this.pk) || ageSec > 90) return;
+        if (this.groupCallHandler) this.groupCallHandler(from, c, rumor);
+        break;
+      }
       case 'game': {
         const chatId = this.chatIdFor(from, c);
         if (c.g ? !this.inGroup(c.g, from) : !this.isFriend(from)) return;
@@ -1115,7 +1121,7 @@ export class App extends EventTarget {
     const chat = this.store.chat(entry.peer);
     const id = 'call:' + entry.id;
     if (!chat.messages.some((m) => m.id === id)) {
-      this.insertMessage(chat, { id, kind: 'call', from: entry.dir === 'out' ? this.pk : entry.peer, ts: entry.ts, video: entry.video, dur: entry.dur, missed: entry.missed, reason: entry.reason, dir: entry.dir });
+      this.insertMessage(chat, { id, kind: 'call', from: entry.dir === 'out' ? this.pk : (entry.by || entry.peer), ts: entry.ts, video: entry.video, group: !!entry.group, dur: entry.dur, missed: entry.missed, reason: entry.reason, dir: entry.dir });
     }
     this.store.save();
     if (!fromSync) this.syncToSelf({ t: 'calllog', e: entry });

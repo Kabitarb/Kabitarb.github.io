@@ -7,6 +7,7 @@ import { resolveLogin, usernameTaken, setPassword, checkPassword, republishKeyst
 import { Store, settings, session } from './store.js';
 import { App, isGroupId, gidOf, profileFp, EXPIRE_OPTIONS } from './app.js';
 import { CallManager, Tones } from './rtc.js';
+import { GroupCallManager } from './groupcall.js';
 import { PACKS, stickerIds, stickerSvg, animIds, animOf, animHtml } from './stickers.js';
 import { GameManager, GAMES, VIEWS, GAME_ORDER } from './games.js';
 import { ShareManager } from './share.js';
@@ -427,16 +428,16 @@ async function startApp(sk, newName, username) {
     c.title = `${n}/${total} relays connected`;
   });
   app = new App(sk, store, transport);
-  window.__chatly = app; window.__games = () => games; // diagnostics / tests
+  window.__chatly = app; window.__games = () => games; window.__gcalls = () => gcalls; // diagnostics / tests
   applyKeepAlive();
   checkShellUpdate();
   accountSk = sk;
   app.sharePresence = s.presence !== false;
-  calls = new CallManager(app);
+  calls = new CallManager(app); gcalls = new GroupCallManager(app); app.calls = calls;
   games = new GameManager(app);
   watch = new WatchManager(app);
   share = new ShareManager(app);
-  wireApp(); wireCalls(); wireGames(); wireWatch(); wireShare();
+  wireApp(); wireCalls(); wireGroupCalls(); wireGames(); wireWatch(); wireShare();
   $('auth').classList.add('hidden'); $('main').classList.remove('hidden');
   window.dispatchEvent(new Event('chatly:ready'));
   $('login-form').reset(); $('signup-form').reset();
@@ -746,6 +747,9 @@ function renderFriends() {
   });
 }
 
+function groupCallLabel(c) {
+  return `Group ${c.video ? 'video' : 'voice'} call${c.missed ? ' · missed' : c.reason === 'declined' ? ' · declined' : c.dir === 'out' ? ' · you started it' : c.by ? ' · by ' + app.nameOf(c.by) : ''}${c.dur ? ' · ' + (c.dur < 60 ? c.dur + ' s' : Math.round(c.dur / 60) + ' min') : ''}`;
+}
 function renderCalls() {
   const el = $('call-list');
   const log = app.state.calls;
@@ -753,7 +757,7 @@ function renderCalls() {
   el.innerHTML = log.map((c, i) => `<div class="item" data-i="${i}">
     ${avatarHtml(c.peer)}
     <div class="body"><div class="top"><span class="name" style="${c.missed ? 'color:var(--danger)' : ''}">${esc(app.nameOf(c.peer))}</span><span class="time">${fmtListTime(c.ts)}</span></div>
-    <div class="preview"><span>${callLabel(c)}</span></div></div>
+    <div class="preview"><span>${c.group ? groupCallLabel(c) : callLabel(c)}</span></div></div>
     <button class="icon-btn call-icon ${c.missed ? 'missed' : ''}" title="Call back">${c.video ? VIDEO_SVG : PHONE_SVG}</button></div>`).join('');
   el.querySelectorAll('.item').forEach((i) => {
     const c = log[Number(i.dataset.i)];
@@ -1146,6 +1150,7 @@ let renderedIds = new Set();
 let renderedChat = null;
 let chatAnimTimer = null;
 function openChat(id) {
+  setTimeout(renderGcallBanner, 0);
   if (!id) return;
   if (app.openChat && app.openChat !== id) app.store.chat(app.openChat).draft = $('input').value;
   app.setOpenChat(id);
@@ -1263,8 +1268,9 @@ function renderChat(scrollToEnd = false) {
   $('pending-name').textContent = app.nameOf(id);
   $('composer').classList.toggle('hidden', !can);
   $('left-note').classList.toggle('hidden', !(group && !g));
-  $('audio-call-btn').classList.toggle('hidden', group || !can || pending);
-  $('video-call-btn').classList.toggle('hidden', group || !can || pending);
+  const noCall = group ? !(app.group(app.openChat)?.members.length > 1) : (!can || pending);
+  $('audio-call-btn').classList.toggle('hidden', noCall);
+  $('video-call-btn').classList.toggle('hidden', noCall);
   $('plus-btn').classList.toggle('hidden', !can || pending);
   updateTyping();
 
@@ -2477,7 +2483,8 @@ function wireShare() {
 }
 
 /* ---------------- calls ---------------- */
-let callTimer = null, ringVib = null, lastCallState = '', callMini = false, lastCallInfo = null;
+let callTimer = null, ringVib = null, lastCallState = '', callMini = false, lastCallInfo = null, gcalls = null;
+const ac = () => (gcalls && gcalls.state !== 'idle' ? gcalls : calls);
 function setCallMini(on) {
   callMini = on;
   const ov = $('call');
@@ -2491,7 +2498,7 @@ $('call-min-btn').onclick = (e) => { e.stopPropagation(); setCallMini(true); };
 $('mini-hang').onclick = (e) => { e.stopPropagation(); calls.hangup(); };
 $('call').addEventListener('click', (e) => { if (callMini && !e.target.closest('#mini-hang')) setCallMini(false); });
 function startCall(pk, video) {
-  if (isGroupId(pk)) { toast('Group calls are not supported yet'); return; }
+  if (isGroupId(pk)) { if (!navigator.mediaDevices || !window.RTCPeerConnection) { toast('Calls are not supported in this browser', 'error'); return; } if (calls.state !== 'idle' || gcalls.state !== 'idle') { toast('Already in a call'); return; } tones.ensure(); gcalls.start(pk, video).catch((e) => toast(e.message, 'error')); return; }
   if (!app.isFriend(pk)) { toast('Accept the friend request first'); return; }
   if (!navigator.mediaDevices || !window.RTCPeerConnection) { toast('Calls are not supported in this browser', 'error'); return; }
   tones.ensure();
@@ -2499,12 +2506,12 @@ function startCall(pk, video) {
 }
 $('audio-call-btn').onclick = () => startCall(app.openChat, false);
 $('video-call-btn').onclick = () => startCall(app.openChat, true);
-$('hangup-btn').onclick = () => calls.hangup();
-$('decline-btn').onclick = () => calls.decline();
-$('accept-btn').onclick = () => { tones.ensure(); calls.accept(); };
-$('mute-btn').onclick = () => calls.toggleMute();
-$('cam-btn').onclick = () => calls.toggleCamera();
-$('flip-btn').onclick = () => calls.switchCamera();
+$('hangup-btn').onclick = () => ac().hangup();
+$('decline-btn').onclick = () => ac().decline();
+$('accept-btn').onclick = () => { tones.ensure(); ac().accept(); };
+$('mute-btn').onclick = () => ac().toggleMute();
+$('cam-btn').onclick = () => ac().toggleCamera();
+$('flip-btn').onclick = () => ac().switchCamera();
 $('share-btn').onclick = () => calls.shareScreen();
 $('call-game-btn').onclick = (e) => { e.stopPropagation(); const peer = calls.peer; if (!peer) return; setCallMini(true); openGames(peer); };
 let speakerOn = false;
@@ -2642,6 +2649,8 @@ function wireCalls() {
 
 function renderCall(info) {
   const ov = $('call');
+  if (info.group) return renderGroupCall(info);
+  if (gcalls && gcalls.state !== 'idle') { if (info.state === 'incoming') calls.decline(); return; }
   if (info.state === 'idle') {
     lastCallState = 'idle'; lastCallInfo = null;
     if (callMini) setCallMini(false);
@@ -2699,6 +2708,104 @@ function renderCall(info) {
     upd(); callTimer = setInterval(upd, 1000);
   }
   lastCallState = info.state;
+}
+
+/* ---------------- group calls ---------------- */
+const MUTED_SVG = '<svg viewBox="0 0 24 24"><path d="M19 11h-1.7a5.3 5.3 0 0 1-.5 2.2l1.3 1.3A7 7 0 0 0 19 11ZM4.3 3 3 4.3l6 6V11a3 3 0 0 0 4.6 2.5l1.4 1.4A5 5 0 0 1 7 11H5.3a7 7 0 0 0 6 6.9V21h1.4v-3.1a7 7 0 0 0 3.2-1.2l3.8 3.8 1.3-1.3L4.3 3Zm10.6 8V6a3 3 0 0 0-6 0v.5l6 6V11Z"/></svg>';
+function renderGroupCall(info) {
+  const ov = $('call'), grid = $('call-grid');
+  if (info.state === 'idle') {
+    ov.classList.remove('group', 'ringing'); grid.classList.add('hidden'); grid.innerHTML = '';
+    if (calls.state !== 'idle') return renderCall(calls.info());
+    renderGcallBanner();
+    return renderCall({ state: 'idle' });
+  }
+  ov.classList.remove('hidden'); ov.classList.add('group');
+  lastCallInfo = info;
+  if (lastCallState === 'idle' || lastCallState === '') { if (callMini) setCallMini(false); ov.style.setProperty('--call-bg', 'none'); }
+  if (callMini) ov.classList.toggle('voice', !info.video);
+  setAvatar($('call-avatar'), info.gid);
+  $('call-name').textContent = app.nameOf(info.gid); $('mini-name').textContent = app.nameOf(info.gid);
+  const incoming = info.state === 'incoming';
+  ov.classList.toggle('ringing', incoming || info.state === 'outgoing');
+  $('call-min-btn').classList.toggle('hidden', incoming);
+  $('incoming-controls').classList.toggle('hidden', !incoming);
+  $('call-controls').classList.toggle('hidden', incoming);
+  $('local-video').classList.add('hidden');
+  $('cam-btn').classList.toggle('hidden', !info.video); $('flip-btn').classList.toggle('hidden', !info.video);
+  for (const id of ['share-btn', 'call-game-btn', 'call-watch-btn', 'call-share-btn']) $(id).classList.add('hidden');
+  $('speaker-btn').classList.toggle('hidden', !nativeAudio || info.state !== 'active');
+  $('mute-btn').classList.toggle('on', info.muted); $('cam-btn').classList.toggle('on', info.camOff);
+  ov.classList.remove('sharing');
+  ov.classList.toggle('has-video', !!((info.video && !info.camOff) || info.peers.some((p) => p.video)));
+  grid.classList.toggle('hidden', incoming);
+  if (!incoming) renderGrid(info);
+  const status = $('call-status');
+  clearInterval(callTimer);
+  if (incoming) {
+    status.textContent = `${app.nameOf(info.ringer)} is calling the group…`;
+    if (lastCallState !== 'incoming') {
+      if (settings.get().sounds) tones.startRing(true);
+      haptic([400, 200, 400]);
+      clearInterval(ringVib); ringVib = setInterval(() => haptic([400, 200, 400]), 2500);
+      callNotification(Object.assign({}, info, { peer: info.gid }));
+    }
+  } else { clearInterval(ringVib); ringVib = null; closeCallNotification(); }
+  const n = info.peers.filter((p) => p.connected).length + 1;
+  if (info.state === 'outgoing') status.textContent = $('mini-time').textContent = 'Calling the group…';
+  else if (info.state === 'connecting') { tones.stop(); status.textContent = $('mini-time').textContent = 'Joining…'; }
+  else if (info.state === 'active') {
+    tones.stop();
+    if (lastCallState !== 'active') setSpeaker(true);
+    const upd = () => { const sec = Math.floor((Date.now() - info.startedAt) / 1000); const clock = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`; status.textContent = `${clock} · ${n} in call`; $('mini-time').textContent = clock; };
+    upd(); callTimer = setInterval(upd, 1000);
+  }
+  lastCallState = info.state;
+}
+function renderGrid(info) {
+  const grid = $('call-grid');
+  const tiles = [{ pk: app.pk, stream: info.local, video: info.video && !info.camOff, muted: info.muted, me: true, connected: true, speaking: false }].concat(info.peers);
+  grid.dataset.n = String(tiles.length);
+  const keep = new Set(tiles.map((t) => t.pk));
+  grid.querySelectorAll('.ctile').forEach((el) => { if (!keep.has(el.dataset.pk)) { el.classList.add('leave'); el.remove(); } });
+  for (const t of tiles) {
+    let el = grid.querySelector(`.ctile[data-pk="${t.pk}"]`);
+    if (!el) {
+      el = document.createElement('div'); el.className = 'ctile enter' + (t.me ? ' me' : ''); el.dataset.pk = t.pk;
+      el.innerHTML = `<video autoplay playsinline ${t.me ? 'muted' : ''} class="hidden"></video>${avatarHtml(t.pk)}<div class="ctag"><b></b></div>`;
+      grid.appendChild(el);
+    }
+    const v = el.querySelector('video');
+    if (t.stream && v.srcObject !== t.stream) { v.srcObject = t.stream; v.play().catch(() => {}); }
+    v.classList.toggle('hidden', !(t.video && t.stream));
+    el.classList.toggle('waiting', !t.connected && !t.me);
+    el.classList.toggle('speaking', !!t.speaking);
+    el.querySelector('.ctag').innerHTML = `${t.muted ? MUTED_SVG : ''}<b>${t.me ? 'You' : esc(app.nameOf(t.pk))}</b>`;
+  }
+}
+function renderGcallBanner() {
+  let b = document.getElementById('gcall-banner');
+  const id = app && app.openChat, o = id && isGroupId(id) && gcalls && gcalls.ongoing[id];
+  const on = o && gcalls.state === 'idle' && calls.state === 'idle' && Date.now() - o.ts < 2 * 3600e3 && !$('chat').classList.contains('hidden');
+  if (!on) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement('div'); b.id = 'gcall-banner'; b.className = 'gcall-banner'; $('chat-name').closest('header').insertAdjacentElement('afterend', b); }
+  b.innerHTML = `<span class="pulse"></span><b>${esc(app.nameOf(o.by))} started a ${o.video ? 'video' : 'voice'} call</b><button class="btn" id="gcall-join">Join</button>`;
+  $('gcall-join').onclick = () => { tones.ensure(); gcalls.join(id).catch((e) => toast(e.message, 'error')); };
+}
+function wireGroupCalls() {
+  gcalls.addEventListener('state', (e) => renderCall(e.detail));
+  gcalls.addEventListener('local', () => { if (gcalls.state !== 'idle' && gcalls.state !== 'incoming') renderGrid(gcalls.info()); });
+  gcalls.addEventListener('peer', () => renderGrid(gcalls.info()));
+  gcalls.addEventListener('speaking', () => { document.querySelectorAll('#call-grid .ctile').forEach((t) => { const p = gcalls.peers.get(t.dataset.pk); t.classList.toggle('speaking', !!(p && p.speaking)); }); });
+  gcalls.addEventListener('ringing', () => { if (settings.get().sounds) tones.startRing(false); });
+  gcalls.addEventListener('outgoing', (e) => nudge(app.members(e.detail.gid), 'call'));
+  gcalls.addEventListener('error', (e) => toast(e.detail, 'error'));
+  gcalls.addEventListener('left', (e) => { if (e.detail.remote) toast(`${app.nameOf(e.detail.pk)} left the call`); });
+  gcalls.addEventListener('ongoing', () => renderGcallBanner());
+  gcalls.addEventListener('ended', (e) => {
+    const msg = { 'no-answer': 'No one answered', failed: 'Could not connect', ended: 'Call ended', error: 'Call could not start', missed: 'Missed group call', declined: 'Declined' }[e.detail] || 'Call ended';
+    toast(msg); renderGcallBanner();
+  });
 }
 
 /* ---------------- boot ---------------- */
