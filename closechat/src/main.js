@@ -2374,6 +2374,13 @@ function openGame(id) {
 function closeGamePanel() { clearInterval(gameTimerIv); dropGameView(); openGameId = null; gameMini = false; $('game').classList.add('hidden'); $('game').classList.remove('full', 'mini', 'turn'); }
 function setGameMini(on) { gameMini = on; renderGame(); haptic(); }
 $('game-hide').onclick = () => setGameMini(true);
+// Fullscreen HUD: the header pill dims after 3 s without input; a swipe down from the top band minimizes.
+let gameIdleT = 0, gameSwipe = null;
+function gameActive() { const p = $('game'); p.classList.remove('idle'); clearTimeout(gameIdleT); gameIdleT = setTimeout(() => p.classList.add('idle'), 3000); }
+$('game').addEventListener('pointerdown', (e) => { gameActive(); const p = $('game'); if (!p.classList.contains('full') || e.target.closest('button')) return; const band = 56 + (parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-top')) || 0); gameSwipe = e.clientY - p.getBoundingClientRect().top < band ? { y: e.clientY, x: e.clientX } : null; }, { passive: true });
+$('game').addEventListener('pointermove', (e) => { if (!gameSwipe) return; if (e.clientY - gameSwipe.y > 70 && Math.abs(e.clientX - gameSwipe.x) < 60) { gameSwipe = null; setGameMini(true); } }, { passive: true });
+$('game').addEventListener('pointerup', () => { gameSwipe = null; }, { passive: true });
+$('game').addEventListener('keydown', gameActive);
 $('game-mini-bar').onclick = (e) => { if (!e.target.closest('#game-mini-leave')) setGameMini(false); };
 async function leaveGame() {
   const s = games.get(openGameId); if (!s) return;
@@ -2398,7 +2405,9 @@ function renderGame() {
   const myTurn = games.isMyTurn(s);
   const over = games.isOver(s);
   panel.classList.toggle('mini', gameMini);
+  const wasFull = panel.classList.contains('full');
   panel.classList.toggle('full', !gameMini && s.status !== 'lobby');
+  if (panel.classList.contains('full') && !wasFull) gameActive(); else if (!panel.classList.contains('full')) { panel.classList.remove('idle'); clearTimeout(gameIdleT); }
   panel.classList.toggle('turn', gameMini && myTurn);
   panel.dataset.game = s.type;
   $('game-mini-icon').textContent = G.icon;
