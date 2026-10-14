@@ -276,6 +276,7 @@ export class App extends EventTarget {
       const p = this.state.profile;
       if ((c.name || c.av !== undefined) && rumor.created_at < (p.ts || 0)) return;
       if (c.name) p.name = String(c.name).slice(0, 40);
+      if (c.ntfy !== undefined) p.ntfy = String(c.ntfy).slice(0, 64);
       if (c.av !== undefined) p.avatar = c.av || '';
       if (c.name || c.av !== undefined) p.ts = rumor.created_at;
       if (c.u) p.username = c.u;
@@ -518,6 +519,7 @@ export class App extends EventTarget {
         const f = this.state.friends[from] || (this.state.friends[from] = { name: '', status: 'request', since: Date.now() });
         if (rumor.created_at >= (f.pts || 0)) {
           if (c.name) f.name = String(c.name).slice(0, 40);
+          if (c.ntfy !== undefined) f.ntfy = String(c.ntfy).slice(0, 64);
           if (typeof c.av === 'string' && c.av.length < 20000) f.avatar = c.av;
           f.pts = rumor.created_at;
         }
@@ -529,7 +531,7 @@ export class App extends EventTarget {
           if (f.status === 'friend' || f.status === 'pending') {
             // Mutual request (or they re-sent): we already want them, so this completes the handshake.
             f.status = 'friend';
-            this.sendControl(from, { t: 'friend', a: 'accept', name: this.state.profile.name, av: this.state.profile.avatar });
+            this.sendControl(from, { t: 'friend', a: 'accept', name: this.state.profile.name, av: this.state.profile.avatar, ntfy: this.state.profile.ntfy || '' });
             this.emit('friend', { pk: from, accepted: true });
           } else { if (f.status === 'contact') f.status = 'request'; this.emit('request', { pk: from, fresh: this.ready }); }
         }
@@ -541,10 +543,11 @@ export class App extends EventTarget {
         // Old copies can be replayed after newer ones; keep the newest only.
         if (rumor.created_at >= (f.pts || 0)) {
           if (c.name) f.name = String(c.name).slice(0, 40);
+          if (c.ntfy !== undefined) f.ntfy = String(c.ntfy).slice(0, 64);
           if (typeof c.av === 'string' && c.av.length < 20000) f.avatar = c.av;
           f.pts = rumor.created_at;
         }
-        if (c.req && this.knows(from)) this.sendControl(from, { t: 'profile', name: this.state.profile.name, av: this.state.profile.avatar });
+        if (c.req && this.knows(from)) this.sendControl(from, { t: 'profile', name: this.state.profile.name, av: this.state.profile.avatar, ntfy: this.state.profile.ntfy || '' });
         this.emit('friend', { pk: from });
         break;
       }
@@ -566,7 +569,7 @@ export class App extends EventTarget {
         if (typeof c.ah === 'string' && c.ah !== profileFp(f.name, f.avatar) && Date.now() - (this.profileAsked[from] || 0) > 4 * 60000) {
           this.profileAsked[from] = Date.now();
           const p = this.state.profile;
-          this.sendControl(from, { t: 'profile', name: p.name, av: p.avatar, req: 1 });
+          this.sendControl(from, { t: 'profile', name: p.name, av: p.avatar, ntfy: p.ntfy || '', req: 1 });
         }
         this.emit('presence', { pk: from });
         break;
@@ -812,6 +815,7 @@ export class App extends EventTarget {
       m.status = 'failed'; m.error = e.message;
     }
     this.store.save();
+    this.ntfyPing(group ? this.members(chatId) : [chatId], 'Chatly', `${this.state.profile.name || 'A friend'} sent you a message`, 'speech_balloon');
     return m;
   }
 
@@ -953,7 +957,7 @@ export class App extends EventTarget {
     f.status = 'pending'; f.since = Date.now();
     this.store.chat(pk);
     this.store.save();
-    this.sendControl(pk, { t: 'friend', a: 'request', name: this.state.profile.name, av: this.state.profile.avatar });
+    this.sendControl(pk, { t: 'friend', a: 'request', name: this.state.profile.name, av: this.state.profile.avatar, ntfy: this.state.profile.ntfy || '' });
     return 'pending';
   }
   cancelRequest(pk) {
@@ -969,7 +973,7 @@ export class App extends EventTarget {
     const chat = this.store.chat(pk);
     const ids = chat.messages.filter((m) => m.from === pk).map((m) => { m.acked = 'delivered'; return m.id; });
     if (ids.length) this.sendControl(pk, { t: 'receipt', ids: ids.slice(-50), s: 'delivered' });
-    this.sendControl(pk, { t: 'friend', a: 'accept', name: this.state.profile.name, av: this.state.profile.avatar });
+    this.sendControl(pk, { t: 'friend', a: 'accept', name: this.state.profile.name, av: this.state.profile.avatar, ntfy: this.state.profile.ntfy || '' });
     this.store.save();
   }
 
@@ -983,12 +987,26 @@ export class App extends EventTarget {
   removeFriend(pk) { delete this.state.friends[pk]; delete this.state.chats[pk]; this.store.save(); this.syncToSelf({ t: 'unfriend', pk }); }
   clearChat(chatId) { const c = this.store.chat(chatId); c.messages = []; c.unread = 0; this.store.save(); }
 
+  /* ---------- closed-app alerts via ntfy (free, serverless: the sender's device pings the friend's private topic) ---------- */
+  ntfyPing(pks, title, body, tags, priority = 'default') {
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+    const now = Date.now(); this._ntfyLast ||= {};
+    for (const pk of pks) {
+      const f = this.state.friends[pk];
+      if (!f || f.status !== 'friend' || !f.ntfy || !/^[\w-]{6,64}$/.test(f.ntfy)) continue;
+      const key = pk + ':' + tags; if (priority !== 'urgent' && now - (this._ntfyLast[key] || 0) < 45000) continue;
+      this._ntfyLast[key] = now;
+      fetch('https://ntfy.sh/' + f.ntfy, { method: 'POST', body, headers: { Title: title, Priority: priority, Tags: tags, Click: location.href.split('#')[0] } }).catch(() => {});
+    }
+  }
+  async setNtfy(topic) { this.state.profile.ntfy = topic || ''; this.state.profile.ts = Date.now(); this.store.save(); this.broadcastProfile(); }
+
   /* ---------- profile ---------- */
   broadcastProfile() {
     const p = this.state.profile;
     const friends = Object.entries(this.state.friends).filter(([, f]) => f.status === 'friend');
-    for (const [pk] of friends) this.sendControl(pk, { t: 'profile', name: p.name, av: p.avatar });
-    if (!friends.length) this.syncToSelf({ t: 'profile', name: p.name, av: p.avatar });
+    for (const [pk] of friends) this.sendControl(pk, { t: 'profile', name: p.name, av: p.avatar, ntfy: p.ntfy || '' });
+    if (!friends.length) this.syncToSelf({ t: 'profile', name: p.name, av: p.avatar, ntfy: p.ntfy || '' });
     if (p.username && this.discoverable !== false) this.publishDirectory(true);
   }
   setName(name) {
@@ -1106,7 +1124,7 @@ export class App extends EventTarget {
     if (added.length) {
       this.store.save();
       // Ask restored contacts for their current name/photo (not kept in the backup).
-      this.sendToMany(added, { t: 'profile', name: p.name, av: p.avatar, req: 1 }, false, false);
+      this.sendToMany(added, { t: 'profile', name: p.name, av: p.avatar, ntfy: p.ntfy || '', req: 1 }, false, false);
       this.sendPresence(added.filter((pk) => this.isFriend(pk)), true);
       this.emit('restored', { n: added.length });
     }

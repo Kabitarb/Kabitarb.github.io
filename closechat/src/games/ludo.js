@@ -107,10 +107,35 @@ export function ludoCaptures(st, pi, i) {
   if (SAFE.has(abs)) return false;
   return st.tokens.some((ot, op) => op !== pi && ot.some((p) => p >= 0 && p <= 50 && (START[st.colors[op]] + p) % 52 === abs));
 }
-export const PIECES = { coin: { name: 'Classic', g: '' }, pawn: { name: 'Pawn', g: '♟' }, crown: { name: 'Crown', g: '👑' }, gem: { name: 'Gem', g: '💎' }, star: { name: 'Star', g: '⭐' }, heart: { name: 'Heart', g: '❤️' }, cat: { name: 'Cat', g: '🐱' }, dog: { name: 'Dog', g: '🐶' }, rocket: { name: 'Rocket', g: '🚀' }, frog: { name: 'Frog', g: '🐸' } };
+export const PIECES = { coin: { name: 'Classic' }, pawn: { name: 'Pawn' }, bishop: { name: 'Bishop' }, rook: { name: 'Rook' }, crown: { name: 'Crown' }, cone: { name: 'Cone' }, dome: { name: 'Dome' }, gem: { name: 'Gem' }, star: { name: 'Star' }, heart: { name: 'Heart' } };
 export const PIECE_KEY = 'chatly:ludo:piece';
 export const myPiece = () => (PIECES[localStorage.getItem(PIECE_KEY)] ? localStorage.getItem(PIECE_KEY) : 'coin');
-export function pieceGlyph(id) { return (PIECES[id] || PIECES.coin).g; }
+export function pieceGlyph() { return ''; }
+// Shade a #rrggbb colour by k (-1..1).
+function shade(hex, k) {
+  const n = parseInt(hex.slice(1), 16); const ch = (o) => { const v = (n >> o) & 255; return Math.round(k < 0 ? v * (1 + k) : v + (255 - v) * k); };
+  return `rgb(${ch(16)},${ch(8)},${ch(0)})`;
+}
+const STAR = Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? 4.6 : 11; return `${(Math.cos(a) * r).toFixed(2)} ${(Math.sin(a) * r).toFixed(2)}`; }).join(' L');
+const SHAPES = {
+  coin: (f) => `<ellipse cx="0" cy="3" rx="10.5" ry="5" fill="${f.dark}"/><path d="M-10.5 -1 V3 A10.5 5 0 0 0 10.5 3 V-1 Z" fill="${f.side}"/><ellipse cx="0" cy="-1" rx="10.5" ry="5" fill="url(#${f.rad})" stroke="${f.rim}" stroke-width="1"/><ellipse cx="0" cy="-1" rx="6.5" ry="3" fill="none" stroke="rgba(255,255,255,.75)" stroke-width="1.2"/><ellipse cx="-3.5" cy="-2.6" rx="2.6" ry="1.1" fill="rgba(255,255,255,.55)"/>`,
+  pawn: (f) => `<path d="M-8.5 11 Q-8.5 6.5 -3.5 4.5 L-2.5 0.5 Q-5.5 -2 -3.2 -5.2 A3.6 3.6 0 1 1 3.2 -5.2 Q5.5 -2 2.5 0.5 L3.5 4.5 Q8.5 6.5 8.5 11 Z" fill="url(#${f.lin})" stroke="${f.rim}" stroke-width="1.1" stroke-linejoin="round"/><ellipse cx="-1.6" cy="-7" rx="1.4" ry="1.9" fill="rgba(255,255,255,.5)" transform="rotate(-25 -1.6 -7)"/><path d="M-8 10.3 Q0 8.4 8 10.3" fill="none" stroke="rgba(0,0,0,.25)" stroke-width="1"/>`,
+  bishop: (f) => `<path d="M-7 11 Q-7 6.5 -2.5 4.5 L-3.5 -1 Q-5 -7 0 -11 Q5 -7 3.5 -1 L2.5 4.5 Q7 6.5 7 11 Z" fill="url(#${f.lin})" stroke="${f.rim}" stroke-width="1.1" stroke-linejoin="round"/><circle cx="0" cy="-10.2" r="1.6" fill="${f.light}" stroke="${f.rim}" stroke-width=".8"/><path d="M-1.5 -2 L2.5 -6.5" stroke="rgba(255,255,255,.55)" stroke-width="1.2" stroke-linecap="round"/>`,
+  rook: (f) => `<path d="M-7.5 11 L-7.5 -1 L-6 -3 L-6 -10 L-2.8 -10 L-2.8 -7 L-1 -7 L-1 -10 L1 -10 L1 -7 L2.8 -7 L2.8 -10 L6 -10 L6 -3 L7.5 -1 L7.5 11 Z" fill="url(#${f.lin})" stroke="${f.rim}" stroke-width="1.1" stroke-linejoin="round"/><path d="M-4.5 -1 L-4.5 9" stroke="rgba(255,255,255,.4)" stroke-width="1.4" stroke-linecap="round"/><path d="M-7.5 -1 H7.5" stroke="rgba(0,0,0,.25)" stroke-width="1"/>`,
+  crown: (f) => `<path d="M-9.5 10 L-9.5 -1 L-4.5 3.5 L0 -8.5 L4.5 3.5 L9.5 -1 L9.5 10 Z" fill="url(#${f.lin})" stroke="${f.rim}" stroke-width="1.1" stroke-linejoin="round"/><circle cx="-9.5" cy="-1.5" r="1.7" fill="${f.light}"/><circle cx="0" cy="-9" r="1.9" fill="${f.light}"/><circle cx="9.5" cy="-1.5" r="1.7" fill="${f.light}"/><path d="M-9.5 6.5 H9.5" stroke="rgba(255,255,255,.45)" stroke-width="1.4"/><circle cx="0" cy="6.5" r="1.4" fill="#fff" opacity=".8"/>`,
+  cone: (f) => `<ellipse cx="0" cy="9" rx="9" ry="3.6" fill="${f.dark}"/><path d="M0 -11 L9 9 A9 3.6 0 0 1 -9 9 Z" fill="url(#${f.lin})" stroke="${f.rim}" stroke-width="1.1" stroke-linejoin="round"/><path d="M-1.2 -7 L-5.5 5" stroke="rgba(255,255,255,.45)" stroke-width="1.6" stroke-linecap="round"/>`,
+  dome: (f) => `<ellipse cx="0" cy="7" rx="10.5" ry="4" fill="${f.dark}"/><path d="M-10.5 6 A10.5 10.5 0 0 1 10.5 6 A10.5 4 0 0 1 -10.5 6 Z" fill="url(#${f.rad})" stroke="${f.rim}" stroke-width="1.1"/><ellipse cx="-3.5" cy="-1.5" rx="3" ry="2" fill="rgba(255,255,255,.5)" transform="rotate(-30 -3.5 -1.5)"/>`,
+  gem: (f) => `<path d="M0 -10.5 L9.5 -2.5 L0 11 L-9.5 -2.5 Z" fill="url(#${f.lin})" stroke="${f.rim}" stroke-width="1.1" stroke-linejoin="round"/><path d="M-9.5 -2.5 L-4 -6.5 L4 -6.5 L9.5 -2.5 Z" fill="rgba(255,255,255,.55)"/><path d="M-4 -6.5 L0 -2.5 L4 -6.5" fill="rgba(255,255,255,.25)"/><path d="M-9.5 -2.5 L0 -2.5 L0 11 Z" fill="rgba(255,255,255,.18)"/><path d="M0 -2.5 L9.5 -2.5 L0 11 Z" fill="rgba(0,0,0,.22)"/>`,
+  star: (f) => `<path d="M${STAR} Z" fill="url(#${f.lin})" stroke="${f.rim}" stroke-width="1.1" stroke-linejoin="round"/><path d="M0 -11 L0 0 L-6.5 -3.6 Z" fill="rgba(255,255,255,.35)"/><path d="M0 0 L6.5 8.9 L0 5 Z" fill="rgba(0,0,0,.2)"/>`,
+  heart: (f) => `<path d="M0 10.5 C-12.5 1.5 -9.5 -9.5 -1.5 -6.5 C-0.5 -6 0 -5.3 0 -5.3 C0 -5.3 0.5 -6 1.5 -6.5 C9.5 -9.5 12.5 1.5 0 10.5 Z" fill="url(#${f.lin})" stroke="${f.rim}" stroke-width="1.1" stroke-linejoin="round"/><ellipse cx="-4.5" cy="-3.5" rx="2.2" ry="1.3" fill="rgba(255,255,255,.55)" transform="rotate(-35 -4.5 -3.5)"/>`
+};
+// 3D-shaded SVG token (24×24 box, origin centred) for a piece shape in a colour.
+export function pieceSvg(shape, color, size = 24, extra = '') {
+  const draw = SHAPES[shape] || SHAPES.coin; const key = String(color).replace(/[^a-z0-9]/gi, '');
+  const f = { lin: `pl-${key}`, rad: `pr-${key}`, light: shade(color, 0.55), side: shade(color, -0.28), dark: shade(color, -0.5), rim: 'rgba(255,255,255,.85)' };
+  const defs = `<defs><linearGradient id="${f.lin}" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${shade(color, 0.5)}"/><stop offset=".45" stop-color="${color}"/><stop offset="1" stop-color="${shade(color, -0.4)}"/></linearGradient><radialGradient id="${f.rad}" cx=".35" cy=".3" r=".8"><stop offset="0" stop-color="${shade(color, 0.6)}"/><stop offset=".55" stop-color="${color}"/><stop offset="1" stop-color="${shade(color, -0.35)}"/></radialGradient></defs>`;
+  return `<g class="piece" transform="scale(${(size / 24).toFixed(3)})" ${extra}>${defs}<ellipse cx="0" cy="11" rx="9.5" ry="3" fill="rgba(0,0,0,.32)"/>${draw(f)}</g>`;
+}
 
 // Board is rotated so the viewer's base is bottom-left; names sit in the corner of their own base.
 export function renderLudo(s, myIdx, nameOf, opts = {}) {
@@ -119,10 +144,10 @@ export function renderLudo(s, myIdx, nameOf, opts = {}) {
   const pieceOf = (pi) => (s.pieces && s.pieces[s.players[pi]]) || (st.pieces && st.pieces[pi]) || 'coin';
   const over = st.phase === 'done' || (st.winner !== null && st.finished.length >= st.n - 1);
   const rot = opts.rotate === false || myIdx < 0 ? 0 : ((3 - st.colors[myIdx] + 4) % 4) * 90;
-  let svg = `<svg viewBox="0 0 ${S} ${S}" class="ludo" style="--rot:${rot}deg"><g class="board" transform="rotate(${rot} ${cx} ${cx})">`;
+  let svg = `<svg viewBox="0 0 ${S} ${S}" class="ludo" style="--rot:${rot}deg"><defs><linearGradient id="lgloss" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".30"/><stop offset=".5" stop-color="#fff" stop-opacity=".06"/><stop offset="1" stop-color="#000" stop-opacity=".14"/></linearGradient><radialGradient id="lwell" cx=".5" cy=".4" r=".75"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef1f5"/></radialGradient><filter id="lshade" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="1.5" stdDeviation="1.6" flood-color="#000" flood-opacity=".28"/></filter></defs><g class="board" transform="rotate(${rot} ${cx} ${cx})">`;
   for (let ci = 0; ci < 4; ci++) {
     const [ox, oy] = BASE_ORIGIN[ci]; const active = st.colors.includes(ci); const fill = active ? colorFill(ci) : '#9aa3ad';
-    svg += `<rect x="${ox * C}" y="${oy * C}" width="${6 * C}" height="${6 * C}" fill="${fill}" opacity="${active ? 1 : .3}"/><rect x="${(ox + 1) * C}" y="${(oy + 1) * C}" width="${4 * C}" height="${4 * C}" rx="14" fill="#fff"/>`;
+    svg += `<rect x="${ox * C}" y="${oy * C}" width="${6 * C}" height="${6 * C}" fill="${fill}" opacity="${active ? 1 : .3}"/><rect x="${ox * C}" y="${oy * C}" width="${6 * C}" height="${6 * C}" fill="url(#lgloss)" opacity="${active ? 1 : .3}"/><rect x="${(ox + 1) * C}" y="${(oy + 1) * C}" width="${4 * C}" height="${4 * C}" rx="14" fill="url(#lwell)" stroke="rgba(0,0,0,.10)" stroke-width="1" filter="url(#lshade)"/>`;
     for (const [bx, by] of BASE_SPOTS) svg += `<circle cx="${(ox + bx + 0.5) * C}" cy="${(oy + by + 0.5) * C}" r="${C * 0.5}" fill="${fill}" opacity="${active ? 1 : .35}"/><circle cx="${(ox + bx + 0.5) * C}" cy="${(oy + by + 0.5) * C}" r="${C * 0.5}" fill="none" stroke="#fff" stroke-width="2.5" opacity=".9"/>`;
   }
   TRACK.forEach(([c, r], i) => {
@@ -142,7 +167,7 @@ export function renderLudo(s, myIdx, nameOf, opts = {}) {
       let [x, y] = ludoXY(st, pi, i, pos, C);
       if (pos >= 0 && pos < 56) { const [c, r] = cellOf(ci, pos); const key = c + ',' + r; const k = occupancy[key] = (occupancy[key] || 0) + 1; x += ((k - 1) % 2) * 7 - 3; y += Math.floor((k - 1) / 2) * 7 - 3; }
       const can = pi === myIdx && legal.has(i);
-      placed.push({ x, y, ci, pi, i, pos, can, cap: can && ludoCaptures(st, pi, i), mine: pi === myIdx, g: pieceGlyph(pieceOf(pi)) });
+      placed.push({ x, y, ci, pi, i, pos, can, cap: can && ludoCaptures(st, pi, i), mine: pi === myIdx, shape: pieceOf(pi) });
     });
   });
   for (const t of placed) if (t.can) {
@@ -150,7 +175,7 @@ export function renderLudo(s, myIdx, nameOf, opts = {}) {
     svg += `<circle class="target ${t.cap ? 'cap' : ''}" cx="${tx}" cy="${ty}" r="${C * 0.42}" fill="none" stroke="${t.cap ? '#ff4d5e' : colorFill(t.ci)}" stroke-width="3" stroke-dasharray="5 4"/>`;
   }
   for (const t of placed) {
-    svg += `<g class="tok ${t.can ? 'can' : ''} ${t.cap ? 'cap' : ''} ${t.pos === 56 ? 'home' : ''}" data-key="${t.pi}-${t.i}" ${t.can ? `data-tok="${t.i}"` : ''} style="--tx:${t.x}px;--ty:${t.y}px"><g transform="rotate(${-rot})"><circle cx="0" cy="${C * 0.1}" r="${C * 0.4}" fill="rgba(0,0,0,.28)"/><circle cx="0" cy="0" r="${C * 0.4}" fill="${colorFill(t.ci)}" stroke="#fff" stroke-width="2.5"/>${t.g ? `<text y="5.5" text-anchor="middle" font-size="15">${t.g}</text>` : `<circle cx="0" cy="0" r="${C * 0.16}" fill="#fff" opacity=".9"/>`}</g></g>`;
+    svg += `<g class="tok ${t.can ? 'can' : ''} ${t.cap ? 'cap' : ''} ${t.pos === 56 ? 'home' : ''}" data-key="${t.pi}-${t.i}" ${t.can ? `data-tok="${t.i}"` : ''} style="--tx:${t.x}px;--ty:${t.y}px"><g transform="rotate(${-rot})">${pieceSvg(t.shape, colorFill(t.ci), C * 1.2)}</g></g>`;
   }
   svg += '</g>';
   // Names in the corner of each player's base (screen position after rotation).
