@@ -44,6 +44,7 @@ export function emptyState() {
     groups: {},         // gid -> { name, members: [pk], admin, since, ts }
     chats: {},          // id (pk or 'g:'+gid) -> { messages: [], unread: 0, lastTs: 0, draft: '' }
     calls: [],          // { id, peer, dir: 'in'|'out', video, ts, dur, missed }
+    gameStats: {},      // per chat: { pk: { w, l, d, streak, best, by: { type: { w, l, d } } } }
     games: {},          // gameId -> serialized game session
     lastSync: 0,        // newest wrap created_at we have processed
     seenRumors: [],

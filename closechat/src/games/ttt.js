@@ -17,6 +17,12 @@ export const engine = {
   },
   again(st) { Object.assign(st, { b: Array(9).fill(-1), turn: st.round % 2, winner: null, line: null, draw: false, round: st.round + 1, last: null }); },
   over(st) { return st.winner !== null || st.draw; },
+  hint(st, pi) {
+    const empties = st.b.map((v, i) => (v === -1 ? i : -1)).filter((i) => i >= 0);
+    const wins = (p) => empties.find((i) => LINES.some((l) => l.includes(i) && l.every((k) => k === i || st.b[k] === p)));
+    const i = wins(pi) ?? wins(1 - pi) ?? (empties.includes(4) ? 4 : [0, 2, 6, 8].find((c) => empties.includes(c)) ?? empties[0]);
+    return i === undefined ? null : { i };
+  },
 };
 
 const X = '<svg viewBox="0 0 100 100" class="mk x"><path d="M22 22 78 78"/><path d="M78 22 22 78"/></svg>';
@@ -32,7 +38,7 @@ export function view(ctx) {
       const cells = st.b.map((v, i) => {
         const win = st.line && st.line.includes(i);
         const can = v === -1 && st.turn === ctx.my && !over;
-        return `<button class="ttt-cell ${win ? 'win' : ''} ${can ? 'can' : ''} p${v} ${fresh && st.last === i ? 'pop' : ''}" data-i="${i}" ${can ? '' : 'disabled'} aria-label="Cell ${i + 1}">${v === 0 ? X : v === 1 ? O : ''}</button>`;
+        return `<button class="ttt-cell ${win ? 'win' : ''} ${can ? 'can' : ''} ${s.hint && s.hint.i === i && can ? 'hint' : ''} p${v} ${fresh && st.last === i ? 'pop' : ''}" data-i="${i}" ${can ? '' : 'disabled'} aria-label="Cell ${i + 1}">${v === 0 ? X : v === 1 ? O : ''}</button>`;
       }).join('');
       el.innerHTML = `${scoreStrip(ctx, s, over, ['✕', '◯'])}
         <div class="g-round">Round ${st.round} · first to ${Math.ceil(meta.series / 2)}</div>

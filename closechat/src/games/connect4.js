@@ -31,6 +31,13 @@ export const engine = {
   },
   again(st) { Object.assign(st, { b: Array(W * H).fill(-1), turn: st.round % 2, winner: null, line: null, draw: false, round: st.round + 1, last: null, n: 0 }); },
   over(st) { return st.winner !== null || st.draw; },
+  hint(st, pi) {
+    const drop = (c) => { let r = H - 1; while (r >= 0 && st.b[r * W + c] !== -1) r--; return r; };
+    const order = [3, 2, 4, 1, 5, 0, 6].filter((c) => drop(c) >= 0);
+    const winsFor = (p) => order.find((c) => { const r = drop(c); st.b[r * W + c] = p; const ok = !!winLine(st.b, r, c, p); st.b[r * W + c] = -1; return ok; });
+    const c = winsFor(pi) ?? winsFor(1 - pi) ?? order.find((k) => { const r = drop(k); if (r === 0) return true; st.b[r * W + k] = pi; const bad = !!winLine(st.b, r - 1, k, 1 - pi) && false; st.b[r * W + k] = -1; return !bad; }) ?? order[0];
+    return c === undefined ? null : { c };
+  },
 };
 
 export function view(ctx) {
@@ -49,7 +56,7 @@ export function view(ctx) {
       }
       el.innerHTML = `${scoreStrip(ctx, s, over, ['<i class="c4-dot p0"></i>', '<i class="c4-dot p1"></i>'])}
         <div class="g-round">Round ${st.round} · first to ${Math.ceil(meta.series / 2)}</div>
-        <div class="c4-wrap"><div class="c4-cols ${mine ? 'mine' : ''}">${Array.from({ length: W }, (_, c) => `<button class="c4-col ${mine && st.b[c] === -1 ? 'can' : ''}" data-c="${c}" ${mine && st.b[c] === -1 ? '' : 'disabled'} aria-label="Column ${c + 1}"><i class="c4-ghost p${ctx.my}"></i></button>`).join('')}</div>
+        <div class="c4-wrap"><div class="c4-cols ${mine ? 'mine' : ''}">${Array.from({ length: W }, (_, c) => `<button class="c4-col ${mine && st.b[c] === -1 ? 'can' : ''} ${s.hint && s.hint.c === c && mine ? 'hint' : ''}" data-c="${c}" ${mine && st.b[c] === -1 ? '' : 'disabled'} aria-label="Column ${c + 1}"><i class="c4-ghost p${ctx.my}"></i></button>`).join('')}</div>
         <div class="c4 ${over ? 'over' : ''}">${cells}</div></div>
         <div class="game-status">${turnText(ctx, s, over)}</div>`;
       el.querySelectorAll('.c4-col.can').forEach((b) => { b.onclick = () => { ctx.haptic(); ctx.move({ c: Number(b.dataset.c) }); }; });
