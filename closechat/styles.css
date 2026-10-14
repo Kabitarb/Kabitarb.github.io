@@ -1713,3 +1713,6 @@ body.call-mini-voice #game.full .game-body { padding-top: calc(112px + var(--saf
 .gpick .gtile .gicon { filter: drop-shadow(0 4px 6px color-mix(in srgb, var(--gc) 45%, transparent)); }
 #game.full .g-player > .avatar:not(img) { background: var(--pc) !important; color: #fff; }
 #game.full .g-player .g-pname { font-size: 12px; letter-spacing: .3px; padding: 5px 10px 5px 14px; max-width: 32vw; }
+.lchip { max-width: 100%; }
+.lchip .lrib { max-width: none; flex: 0 1 auto; min-width: 0; }
+.lchip.turn { z-index: 0; }
