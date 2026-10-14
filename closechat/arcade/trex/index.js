@@ -125,7 +125,7 @@
         SPEED: 6,
         SPEED_DROP_COEFFICIENT: 3,
         ARCADE_MODE_INITIAL_TOP_POSITION: 35,
-        ARCADE_MODE_TOP_POSITION_PERCENT: 0.1
+        ARCADE_MODE_TOP_POSITION_PERCENT: 0.5
     };
 
 
@@ -864,8 +864,7 @@
             // height minus the game container height.
             const translateY = Math.ceil(Math.max(0, (windowHeight - scaledCanvasHeight -
                                                       Runner.config.ARCADE_MODE_INITIAL_TOP_POSITION) *
-                                                  Runner.config.ARCADE_MODE_TOP_POSITION_PERCENT)) *
-                  window.devicePixelRatio;
+                                                  Runner.config.ARCADE_MODE_TOP_POSITION_PERCENT));
 
             const cssScale = scale;
             this.containerEl.style.transform =

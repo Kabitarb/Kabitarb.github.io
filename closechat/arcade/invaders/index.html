@@ -64,11 +64,13 @@
 
             //  Setup the canvas.
             var canvas = document.getElementById("gameCanvas");
-            canvas.width = 800;
-            canvas.height = 600;
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
 
             //  Create the game.
             var game = new Game();
+            game.config.gameWidth = Math.min(400, canvas.width - 16);
+            game.config.gameHeight = Math.max(300, canvas.height - 120);
 
             //  Initialise it with the game canvas.
             game.initialise(canvas);

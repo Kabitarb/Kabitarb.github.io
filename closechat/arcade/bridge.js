@@ -10,7 +10,20 @@
   if (!document.querySelector('meta[name=viewport]')) document.head.appendChild(meta);
   var st = document.createElement('style'); st.textContent = 'html,body{overscroll-behavior:none;-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent}'; document.head.appendChild(st);
   document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+
+  var fit = {
+    trex: '.interstitial-wrapper{width:62vw!important;max-width:none!important;margin:0 auto!important;padding-top:40vh!important}.arcade-mode .interstitial-wrapper{padding-top:0!important}#messageBox{display:none!important}body{overflow:hidden;background:#fff}',
+    hextris: '.rrssb-buttons,#Share-button,a[href*="itunes"],a[href*="apple.com"],a[href*="play.google"],img[src*="store"],img[src*="Store"],img[src*="google"]{display:none!important}',
+    invaders: '#gamecontainer{position:absolute!important;left:0!important;top:50%!important;width:100vw!important;margin:0!important;transform:translateY(-50%)}#gameCanvas,#gamecanvas{width:100vw!important;height:auto!important;max-height:100vh}#info{display:none!important}',
+    pacman: 'body{width:100vw!important;max-width:100vw;margin:0!important;min-height:100vh;display:flex;flex-direction:column;justify-content:center;background:#000;color:#fff}h1,body>a,#shim,body>br{display:none!important}#pacman{width:100vw!important}',
+    clumsy: 'html,body{height:100%;margin:0;background:#000}body{display:flex;align-items:center;justify-content:center}#screen{width:100%}#screen canvas{position:static!important;display:block;margin:0 auto}'
+  };
+  if (fit[game]) { var fs = document.createElement('style'); fs.textContent = fit[game]; document.head.appendChild(fs); }
+  setTimeout(function () { window.dispatchEvent(new Event('resize')); }, 150);
+  if (game === 'trex') { var h = document.querySelector('#messageBox h1'); if (h) h.textContent = 'Tap to start'; }
+  if (game === 'pacman') Array.prototype.forEach.call(document.body.childNodes, function (n) { if (n.nodeType === 3) n.textContent = ''; });
   if (game === 'trex') {
+    document.addEventListener('touchstart', function (e) { key(32, ' '); if (e.cancelable) e.preventDefault(); }, { passive: false });
     var t = setInterval(function () {
       if (!window.Runner || !Runner.prototype.gameOver) return; clearInterval(t);
       var go = Runner.prototype.gameOver, rs = Runner.prototype.restart;
