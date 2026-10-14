@@ -1045,6 +1045,7 @@ html[data-font="small"] .bubble { font-size: 14px; } html[data-font="large"] .bu
 .g-result-actions { display: flex; gap: 10px; margin-top: 6px; } .g-result-card .link { background: none; border: 0; color: var(--fg2); font-size: 13px; padding: 6px; cursor: pointer; }
 #game.full .game-body { justify-content: flex-start; padding-top: 8px; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; }
 #game.full .game-status { flex: none; }
+#game.full .g-view { flex: 1 0 auto; min-height: auto; }
 #game.full .g-foot { flex: none; }
 .game-status { min-height: 22px; }
 /* tic-tac-toe */
