@@ -52,8 +52,8 @@ export class GroupCallManager extends EventTarget {
       this.video = this.local.getVideoTracks().length > 0;
       this.emit('local', this.local);
       const ring = { a: 'ring', video: this.video, name: this.app.state.profile.name };
-      this.app.ntfyPing?.(this.app.members(gid), this.video ? 'Incoming group video call' : 'Incoming group call', `${this.app.state.profile.name || 'A friend'} started a call on Chatly`, 'telephone_receiver', 'urgent');
       await this.broadcast(ring);
+      this.app.ntfyPing?.(this.app.members(gid), this.video ? 'Incoming group video call' : 'Incoming group call', `${this.app.state.profile.name || 'A friend'} started a call on Chatly`, 'telephone_receiver', 'urgent');
       clearInterval(this.reinvite);
       this.reinvite = setInterval(() => { if (this.state === 'outgoing' && !this.peers.size) this.broadcast(ring); else clearInterval(this.reinvite); }, 4000);
       this.emit('outgoing', { gid, video: this.video });

@@ -27,6 +27,9 @@ const bytesToHexSafe = (u8) => Array.from(u8, (b) => b.toString(16).padStart(2, 
 // Core protocol layer: turns decrypted rumors into state changes and state
 // changes into encrypted gift wraps. A "chat id" is either a friend's pubkey
 // or 'g:<groupId>' for a group.
+/* ntfy topics are plain identifiers; anything else (markup, long strings) is dropped before it is stored or rendered */
+export const ntfyTopic = (v) => (/^[\w-]{6,64}$/.test(String(v ?? '')) ? String(v) : '');
+
 export class App extends EventTarget {
   constructor(sk, store, transport) {
     super();
@@ -276,7 +279,7 @@ export class App extends EventTarget {
       const p = this.state.profile;
       if ((c.name || c.av !== undefined) && rumor.created_at < (p.ts || 0)) return;
       if (c.name) p.name = String(c.name).slice(0, 40);
-      if (c.ntfy !== undefined) p.ntfy = String(c.ntfy).slice(0, 64);
+      if (c.ntfy !== undefined) p.ntfy = ntfyTopic(c.ntfy);
       if (c.av !== undefined) p.avatar = c.av || '';
       if (c.name || c.av !== undefined) p.ts = rumor.created_at;
       if (c.u) p.username = c.u;
@@ -519,7 +522,7 @@ export class App extends EventTarget {
         const f = this.state.friends[from] || (this.state.friends[from] = { name: '', status: 'request', since: Date.now() });
         if (rumor.created_at >= (f.pts || 0)) {
           if (c.name) f.name = String(c.name).slice(0, 40);
-          if (c.ntfy !== undefined) f.ntfy = String(c.ntfy).slice(0, 64);
+          if (c.ntfy !== undefined) f.ntfy = ntfyTopic(c.ntfy);
           if (typeof c.av === 'string' && c.av.length < 20000) f.avatar = c.av;
           f.pts = rumor.created_at;
         }
@@ -543,7 +546,7 @@ export class App extends EventTarget {
         // Old copies can be replayed after newer ones; keep the newest only.
         if (rumor.created_at >= (f.pts || 0)) {
           if (c.name) f.name = String(c.name).slice(0, 40);
-          if (c.ntfy !== undefined) f.ntfy = String(c.ntfy).slice(0, 64);
+          if (c.ntfy !== undefined) f.ntfy = ntfyTopic(c.ntfy);
           if (typeof c.av === 'string' && c.av.length < 20000) f.avatar = c.av;
           f.pts = rumor.created_at;
         }
@@ -815,7 +818,7 @@ export class App extends EventTarget {
       m.status = 'failed'; m.error = e.message;
     }
     this.store.save();
-    this.ntfyPing(group ? this.members(chatId) : [chatId], 'Chatly', `${this.state.profile.name || 'A friend'} sent you a message`, 'speech_balloon');
+    if (m.status !== 'failed') this.ntfyPing(group ? this.members(chatId) : [chatId], 'Chatly', `${this.state.profile.name || 'A friend'} sent you a message`, 'speech_balloon');
     return m;
   }
 
@@ -999,7 +1002,7 @@ export class App extends EventTarget {
       fetch('https://ntfy.sh/' + f.ntfy, { method: 'POST', body, headers: { Title: title, Priority: priority, Tags: tags, Click: location.href.split('#')[0] } }).catch(() => {});
     }
   }
-  async setNtfy(topic) { this.state.profile.ntfy = topic || ''; this.state.profile.ts = Date.now(); this.store.save(); this.broadcastProfile(); }
+  async setNtfy(topic) { this.state.profile.ntfy = ntfyTopic(topic); this.state.profile.ts = Math.floor(Date.now() / 1000); this.store.save(); this.broadcastProfile(); }
 
   /* ---------- profile ---------- */
   broadcastProfile() {
