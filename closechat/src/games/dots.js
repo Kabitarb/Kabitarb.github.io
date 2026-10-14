@@ -3,15 +3,15 @@ import { esc, scoreStrip } from './util.js';
 import { PLAYER_COLORS } from './util.js';
 
 const N = 5; // dots per side
-export const meta = { name: 'Dots & Boxes', icon: '🟦', min: 2, max: 2, color: '#8b5cf6', blurb: 'Draw lines, close boxes, steal chains.', series: 3 };
+export const meta = { name: 'Dots & Boxes', icon: '🟦', min: 2, max: 4, color: '#8b5cf6', blurb: 'Draw lines, close boxes, steal chains. 2–4 players.', series: 3 };
 
 // h[r][c]: horizontal edge from dot (r,c) to (r,c+1) — r in 0..4, c in 0..3
 // v[r][c]: vertical edge from dot (r,c) to (r+1,c) — r in 0..3, c in 0..4
-const blank = () => ({ h: Array.from({ length: N }, () => Array(N - 1).fill(0)), v: Array.from({ length: N - 1 }, () => Array(N).fill(0)), box: Array((N - 1) * (N - 1)).fill(-1), turn: 0, pts: [0, 0], winner: null, draw: false, last: null, moves: 0 });
+const blank = (n = 2) => ({ h: Array.from({ length: N }, () => Array(N - 1).fill(0)), v: Array.from({ length: N - 1 }, () => Array(N).fill(0)), box: Array((N - 1) * (N - 1)).fill(-1), turn: 0, n, pts: Array(n).fill(0), winner: null, draw: false, last: null, moves: 0 });
 const boxDone = (st, r, c) => st.h[r][c] && st.h[r + 1][c] && st.v[r][c] && st.v[r][c + 1];
 
 export const engine = {
-  init() { return Object.assign(blank(), { round: 1, score: [0, 0] }); },
+  init(n = 2) { return Object.assign(blank(n), { round: 1, score: Array(n).fill(0) }); },
   apply(st, pi, mv) {
     if (engine.over(st) || pi !== st.turn) return false;
     const r = Number(mv.r), c = Number(mv.c);
@@ -25,13 +25,14 @@ export const engine = {
     st.pts[pi] += closed.length;
     st.last = { t: mv.t, r, c, pi, closed };
     if (st.box.every((b) => b !== -1)) {
-      if (st.pts[0] === st.pts[1]) st.draw = true; else { st.winner = st.pts[0] > st.pts[1] ? 0 : 1; st.score[st.winner]++; }
+      const best = Math.max(...st.pts); const tops = st.pts.map((p, i) => (p === best ? i : -1)).filter((i) => i >= 0);
+      if (tops.length > 1) st.draw = true; else { st.winner = tops[0]; st.score[st.winner]++; }
       return true;
     }
-    if (!closed.length) st.turn = 1 - st.turn;
+    if (!closed.length) st.turn = (st.turn + 1) % (st.n || 2);
     return true;
   },
-  again(st) { const round = st.round + 1, score = st.score; Object.assign(st, blank(), { round, score, turn: round % 2 }); },
+  again(st) { const round = st.round + 1, score = st.score, n = st.n || 2; Object.assign(st, blank(n), { round, score, turn: (round - 1) % n }); },
   over(st) { return st.winner !== null || st.draw; },
 };
 
@@ -51,10 +52,11 @@ export function view(ctx) {
       for (let r = 0; r < N - 1; r++) for (let c = 0; c < N; c++) svg += line('v', r, c, S + c * G, S + r * G, S + c * G, S + (r + 1) * G);
       for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) svg += `<circle class="dot" cx="${S + c * G}" cy="${S + r * G}" r="5"/>`;
       svg += '</svg>';
-      const status = over ? (st.draw ? "It's a draw" : st.winner === ctx.my ? `You win ${st.pts[st.winner]}–${st.pts[1 - st.winner]}!` : `${esc(ctx.nameOf(s.players[st.winner]))} wins ${st.pts[st.winner]}–${st.pts[1 - st.winner]}`)
+      const tally = st.pts.map((p, i) => `<b style="color:${P(i)}">${p}</b>`).join(' : ');
+      const status = over ? (st.draw ? "It's a draw" : st.winner === ctx.my ? `You win with ${st.pts[st.winner]} boxes!` : `${esc(ctx.nameOf(s.players[st.winner]))} wins with ${st.pts[st.winner]} boxes`)
         : mine ? (fresh && st.last.pi === ctx.my && st.last.closed.length ? 'Box! Go again' : 'Your turn — draw a line') : `${esc(ctx.nameOf(s.players[st.turn]))}'s turn`;
       el.innerHTML = `${scoreStrip(ctx, s, over)}
-        <div class="g-round">Round ${st.round} · boxes <b style="color:${P(0)}">${st.pts[0]}</b> : <b style="color:${P(1)}">${st.pts[1]}</b></div>
+        <div class="g-round">Round ${st.round} · boxes ${tally}</div>
         <div class="dots-wrap">${svg}</div><div class="game-status">${status}</div>`;
       el.querySelectorAll('.dl.can').forEach((l) => { l.onclick = () => { ctx.haptic(); ctx.fx(600, 0.05, 0, 0.05); ctx.move({ t: l.dataset.t, r: Number(l.dataset.r), c: Number(l.dataset.c) }); }; });
       if (fresh && st.last.closed.length) { ctx.fx(880, 0.1, 0, 0.06, 'sine'); ctx.fx(1320, 0.15, 0.08, 0.06, 'sine'); if (st.last.pi === ctx.my) ctx.haptic([20, 40, 20]); }

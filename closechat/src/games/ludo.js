@@ -107,51 +107,58 @@ export function ludoCaptures(st, pi, i) {
   if (SAFE.has(abs)) return false;
   return st.tokens.some((ot, op) => op !== pi && ot.some((p) => p >= 0 && p <= 50 && (START[st.colors[op]] + p) % 52 === abs));
 }
-export function renderLudo(s, myIdx, nameOf) {
-  const st = s.state, C = 30, S = 15 * C;
-  let svg = `<svg viewBox="0 0 ${S} ${S}" class="ludo">`;
+export const PIECES = { coin: { name: 'Classic', g: '' }, pawn: { name: 'Pawn', g: '♟' }, crown: { name: 'Crown', g: '👑' }, gem: { name: 'Gem', g: '💎' }, star: { name: 'Star', g: '⭐' }, heart: { name: 'Heart', g: '❤️' }, cat: { name: 'Cat', g: '🐱' }, dog: { name: 'Dog', g: '🐶' }, rocket: { name: 'Rocket', g: '🚀' }, frog: { name: 'Frog', g: '🐸' } };
+export const PIECE_KEY = 'chatly:ludo:piece';
+export const myPiece = () => (PIECES[localStorage.getItem(PIECE_KEY)] ? localStorage.getItem(PIECE_KEY) : 'coin');
+export function pieceGlyph(id) { return (PIECES[id] || PIECES.coin).g; }
+
+// Board is rotated so the viewer's base is bottom-left; names sit in the corner of their own base.
+export function renderLudo(s, myIdx, nameOf, opts = {}) {
+  const st = s.state, C = 30, S = 15 * C, cx = 7.5 * C;
   const colorFill = (ci) => LUDO_COLORS[ci].fill;
-  const quad = (ci) => {
-    const [ox, oy] = BASE_ORIGIN[ci];
-    const active = st.colors.includes(ci);
-    svg += `<rect x="${ox * C}" y="${oy * C}" width="${6 * C}" height="${6 * C}" rx="10" fill="${active ? colorFill(ci) : '#8892a0'}" opacity="${active ? 1 : .35}"/>
-      <rect x="${(ox + 1) * C}" y="${(oy + 1) * C}" width="${4 * C}" height="${4 * C}" rx="8" fill="#fff" opacity=".92"/>`;
-    for (const [bx, by] of BASE_SPOTS) svg += `<circle cx="${(ox + bx + 0.5) * C}" cy="${(oy + by + 0.5) * C}" r="${C * 0.36}" fill="${active ? colorFill(ci) : '#cfd5dd'}" opacity=".25"/>`;
-  };
-  for (let ci = 0; ci < 4; ci++) quad(ci);
+  const pieceOf = (pi) => (s.pieces && s.pieces[s.players[pi]]) || (st.pieces && st.pieces[pi]) || 'coin';
+  const over = st.phase === 'done' || (st.winner !== null && st.finished.length >= st.n - 1);
+  const rot = opts.rotate === false || myIdx < 0 ? 0 : ((3 - st.colors[myIdx] + 4) % 4) * 90;
+  let svg = `<svg viewBox="0 0 ${S} ${S}" class="ludo" style="--rot:${rot}deg"><g class="board" transform="rotate(${rot} ${cx} ${cx})">`;
+  for (let ci = 0; ci < 4; ci++) {
+    const [ox, oy] = BASE_ORIGIN[ci]; const active = st.colors.includes(ci); const fill = active ? colorFill(ci) : '#9aa3ad';
+    svg += `<rect x="${ox * C}" y="${oy * C}" width="${6 * C}" height="${6 * C}" fill="${fill}" opacity="${active ? 1 : .3}"/><rect x="${(ox + 1) * C}" y="${(oy + 1) * C}" width="${4 * C}" height="${4 * C}" rx="14" fill="#fff"/>`;
+    for (const [bx, by] of BASE_SPOTS) svg += `<circle cx="${(ox + bx + 0.5) * C}" cy="${(oy + by + 0.5) * C}" r="${C * 0.5}" fill="${fill}" opacity="${active ? 1 : .35}"/><circle cx="${(ox + bx + 0.5) * C}" cy="${(oy + by + 0.5) * C}" r="${C * 0.5}" fill="none" stroke="#fff" stroke-width="2.5" opacity=".9"/>`;
+  }
   TRACK.forEach(([c, r], i) => {
-    const startOf = START.indexOf(i);
-    const fill = startOf >= 0 ? colorFill(startOf) : '#fff';
+    const startOf = START.indexOf(i); const fill = startOf >= 0 ? colorFill(startOf) : '#fff';
     svg += `<rect x="${c * C}" y="${r * C}" width="${C}" height="${C}" fill="${fill}" stroke="#c9d1db" stroke-width="1.2"/>`;
     if (SAFE.has(i) && startOf < 0) svg += `<text class="safe-star" x="${(c + 0.5) * C}" y="${(r + 0.5) * C + 6}" text-anchor="middle" font-size="18" fill="#9aa5b1">★</text>`;
+    if (startOf >= 0) svg += `<text x="${(c + 0.5) * C}" y="${(r + 0.5) * C + 6}" text-anchor="middle" font-size="16" fill="rgba(255,255,255,.85)" transform="rotate(${startOf * 90} ${(c + 0.5) * C} ${(r + 0.5) * C})">➜</text>`;
   });
   HOME_COL.forEach((cells, ci) => { for (const [c, r] of cells) svg += `<rect x="${c * C}" y="${r * C}" width="${C}" height="${C}" fill="${colorFill(ci)}" opacity=".85" stroke="#c9d1db" stroke-width="1.2"/>`; });
-  const cx = 7.5 * C, m = 6 * C, M = 9 * C;
+  const m = 6 * C, M = 9 * C;
   svg += `<path d="M${m} ${m}L${cx} ${cx}L${m} ${M}Z" fill="${colorFill(0)}"/><path d="M${m} ${m}L${cx} ${cx}L${M} ${m}Z" fill="${colorFill(1)}"/><path d="M${M} ${m}L${cx} ${cx}L${M} ${M}Z" fill="${colorFill(2)}"/><path d="M${m} ${M}L${cx} ${cx}L${M} ${M}Z" fill="${colorFill(3)}"/>`;
-  // tokens
   const legal = new Set(st.turn === myIdx ? LUDO.legal(st, myIdx) : []);
-  const occupancy = {};
-  const placed = [];
+  const occupancy = {}; const placed = [];
   st.tokens.forEach((toks, pi) => {
     const ci = st.colors[pi];
     toks.forEach((pos, i) => {
-      let x, y;
-      if (pos === -1) { const [ox, oy] = BASE_ORIGIN[ci]; const [bx, by] = BASE_SPOTS[i]; x = (ox + bx + 0.5) * C; y = (oy + by + 0.5) * C; }
-      else { const [c, r] = cellOf(ci, pos); const key = c + ',' + r; const k = occupancy[key] = (occupancy[key] || 0) + 1; x = (c + 0.5) * C + ((k - 1) % 2) * 7 - 3; y = (r + 0.5) * C + Math.floor((k - 1) / 2) * 7 - 3; if (pos === 56) { x = cx + (ci % 2 ? 0 : (ci === 0 ? -20 : 20)); y = cx + (ci % 2 ? (ci === 1 ? -20 : 20) : 0); } }
+      let [x, y] = ludoXY(st, pi, i, pos, C);
+      if (pos >= 0 && pos < 56) { const [c, r] = cellOf(ci, pos); const key = c + ',' + r; const k = occupancy[key] = (occupancy[key] || 0) + 1; x += ((k - 1) % 2) * 7 - 3; y += Math.floor((k - 1) / 2) * 7 - 3; }
       const can = pi === myIdx && legal.has(i);
-      placed.push({ x, y, ci, pi, i, pos, can, cap: can && ludoCaptures(st, pi, i), mine: pi === myIdx });
+      placed.push({ x, y, ci, pi, i, pos, can, cap: can && ludoCaptures(st, pi, i), mine: pi === myIdx, g: pieceGlyph(pieceOf(pi)) });
     });
   });
-  // where legal tokens would land (ghost targets)
   for (const t of placed) if (t.can) {
     const to = t.pos === -1 ? 0 : t.pos + st.dice; const [tx, ty] = ludoXY(st, t.pi, t.i, to, C);
     svg += `<circle class="target ${t.cap ? 'cap' : ''}" cx="${tx}" cy="${ty}" r="${C * 0.42}" fill="none" stroke="${t.cap ? '#ff4d5e' : colorFill(t.ci)}" stroke-width="3" stroke-dasharray="5 4"/>`;
   }
   for (const t of placed) {
-    svg += `<g class="tok ${t.can ? 'can' : ''} ${t.cap ? 'cap' : ''} ${t.pos === 56 ? 'home' : ''}" data-key="${t.pi}-${t.i}" ${t.can ? `data-tok="${t.i}"` : ''} style="--tx:${t.x}px;--ty:${t.y}px"><circle cx="0" cy="${C * 0.08}" r="${C * 0.4}" fill="rgba(0,0,0,.25)"/><circle cx="0" cy="0" r="${C * 0.4}" fill="${colorFill(t.ci)}" stroke="${t.can ? '#fff' : 'rgba(0,0,0,.5)'}" stroke-width="${t.can ? 3.5 : 2}"/><circle cx="-3" cy="-3" r="${C * 0.14}" fill="#fff" opacity=".7"/></g>`;
+    svg += `<g class="tok ${t.can ? 'can' : ''} ${t.cap ? 'cap' : ''} ${t.pos === 56 ? 'home' : ''}" data-key="${t.pi}-${t.i}" ${t.can ? `data-tok="${t.i}"` : ''} style="--tx:${t.x}px;--ty:${t.y}px"><g transform="rotate(${-rot})"><circle cx="0" cy="${C * 0.1}" r="${C * 0.4}" fill="rgba(0,0,0,.28)"/><circle cx="0" cy="0" r="${C * 0.4}" fill="${colorFill(t.ci)}" stroke="#fff" stroke-width="2.5"/>${t.g ? `<text y="5.5" text-anchor="middle" font-size="15">${t.g}</text>` : `<circle cx="0" cy="0" r="${C * 0.16}" fill="#fff" opacity=".9"/>`}</g></g>`;
   }
+  svg += '</g>';
+  // Names in the corner of each player's base (screen position after rotation).
+  st.colors.forEach((ci, pi) => {
+    const q = (ci + rot / 90) % 4; const [ox, oy] = BASE_ORIGIN[q]; const lx = (ox + 3) * C, ly = (oy ? 14.5 : 0.5) * C; const isTurn = st.turn === pi && !over;
+    svg += `<g class="lname ${isTurn ? 'turn' : ''} ${pi === myIdx ? 'me' : ''}" style="--c:${colorFill(ci)}"><rect x="${lx - 2.6 * C}" y="${ly - 0.4 * C}" width="${5.2 * C}" height="${0.8 * C}" rx="12"/><text x="${lx}" y="${ly + 5}" text-anchor="middle" font-size="14" font-weight="700">${esc(nameOf(s.players[pi]))}${st.finished.includes(pi) ? ' 🏁' : ''}</text></g>`;
+  });
   svg += '</svg>';
-  const over = st.phase === 'done' || (st.winner !== null && st.finished.length >= st.n - 1);
   const myTurn = st.turn === myIdx && !over;
   const turnName = st.turn === myIdx ? 'Your' : esc(nameOf(s.players[st.turn])) + "'s";
   let status = '';
@@ -160,10 +167,9 @@ export function renderLudo(s, myIdx, nameOf) {
     if (st.phase === 'roll') status = `${turnName} turn — ${myTurn ? 'roll the dice' : 'rolling…'}`;
     else status = `${turnName} turn — rolled ${st.dice}${myTurn ? ', pick a token' : ''}`;
   }
-  const players = s.players.map((p, i) => `<span class="ludo-player ${st.turn === i && !over ? 'active' : ''}" style="--c:${colorFill(st.colors[i])}"><i></i>${esc(nameOf(p))}${st.finished.includes(i) ? ' 🏁' : ''}</span>`).join('');
   const dice = `<button class="dice ${myTurn && st.phase === 'roll' ? 'can' : ''}" data-game-act="roll" data-d="${st.dice || 0}" ${myTurn && st.phase === 'roll' ? '' : 'disabled'} aria-label="Dice"><span class="cube"><i class="f1"></i><i class="f2"></i><i class="f3"></i><i class="f4"></i><i class="f5"></i><i class="f6"></i></span></button>`;
   const turnColor = colorFill(st.colors[st.turn]);
-  return `<div class="ludo-players">${players}</div>${svg}<div class="ludo-bar" style="--turn:${turnColor}">${dice}<div class="game-status">${status}</div></div>`;
+  return `${svg}<div class="ludo-bar" style="--turn:${turnColor}">${dice}<div class="game-status">${status}</div></div>`;
 }
 const DICE = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
 
@@ -179,7 +185,7 @@ function animateLudo(ctx, s, body) {
     const dice = body.querySelector('.dice'); if (!dice) return;
     svg.classList.add('waiting'); dice.classList.add('rolling');
     for (let k = 0; k < 6; k++) ctx.fx(500 + Math.random() * 500, 0.04, k * 0.11, 0.05, 'square');
-    setTimeout(() => { dice.classList.remove('rolling'); dice.dataset.d = last.d; svg.classList.remove('waiting'); ctx.haptic(10); ctx.fx(last.d === 6 ? 1400 : 900, 0.12, 0, 0.06, 'sine'); }, 760);
+    setTimeout(() => { dice.classList.remove('rolling'); dice.dataset.d = last.d; svg.classList.remove('waiting'); ctx.haptic(10); ctx.fx(last.d === 6 ? 1400 : 900, 0.12, 0, 0.06, 'sine'); }, 1100);
     return;
   }
   if (last.a !== 'move') return;
@@ -221,7 +227,7 @@ export function view(ctx) {
     mount(host) { el = host; },
     update(s) {
       const st = s.state;
-      el.innerHTML = renderLudo(s, ctx.my, ctx.nameOf);
+      el.innerHTML = renderLudo(s, ctx.my, ctx.nameOf, { rotate: !ctx.local });
       animateLudo(ctx, s, el);
       el.querySelectorAll('[data-game-act=roll]').forEach((b) => { b.onclick = () => { ctx.haptic(15); b.disabled = true; ctx.move({ a: 'roll', d: 1 + Math.floor(Math.random() * 6) }); }; });
       el.querySelectorAll('.tok.can').forEach((t) => { t.onclick = () => { ctx.haptic(); ctx.move({ a: 'move', i: Number(t.dataset.tok) }); }; });

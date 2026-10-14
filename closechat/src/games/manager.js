@@ -3,6 +3,7 @@
 // relay event never desyncs the players; a stale peer gets our newer state back.
 import { GAMES, ENGINES } from './registry.js';
 import { randSeed } from './util.js';
+import { PIECES, myPiece } from './ludo.js';
 
 export const REACTIONS = ['😂', '😮', '🔥', '👏', '😤', '🤝', '⏰'];
 const TURN_SEC = 60;
@@ -66,11 +67,11 @@ export class GameManager extends EventTarget {
   invite(chatId, type) {
     if (!GAMES[type]) throw new Error('Unknown game');
     const id = Math.random().toString(36).slice(2, 10);
-    const s = { id, chatId, type, host: this.app.pk, players: [this.app.pk], status: 'lobby', seq: 0, state: null, ts: Date.now() };
+    const s = { id, chatId, type, host: this.app.pk, players: [this.app.pk], pieces: { [this.app.pk]: myPiece() }, status: 'lobby', seq: 0, state: null, ts: Date.now() };
     this.sessions[id] = s;
     this.card(s, `You started ${GAMES[type].name}`);
     this.prune(); this.app.store.save();
-    this.send(s, { a: 'invite', type });
+    this.send(s, { a: 'invite', type, piece: myPiece() });
     this.emit('update', { id });
     return s;
   }
@@ -80,8 +81,9 @@ export class GameManager extends EventTarget {
       if (s.players.length >= GAMES[s.type].max) throw new Error('Game is full');
       s.players.push(this.app.pk);
     }
+    (s.pieces ||= {})[this.app.pk] = myPiece();
     s.ts = Date.now(); this.app.store.save();
-    this.send(s, { a: 'join' });
+    this.send(s, { a: 'join', piece: myPiece() });
     this.emit('update', { id });
   }
   start(id) {
@@ -91,7 +93,7 @@ export class GameManager extends EventTarget {
     s.state = this.engine(s).init(s.players.length, s.seed);
     s.status = 'playing'; s.seq = 1; s.ts = Date.now();
     this.app.store.save();
-    this.send(s, { a: 'start', players: s.players, state: s.state, seq: s.seq, seed: s.seed });
+    this.send(s, { a: 'start', players: s.players, state: s.state, seq: s.seq, seed: s.seed, pieces: s.pieces });
     this.emit('update', { id });
   }
   seriesWinner(s) {
@@ -152,7 +154,8 @@ export class GameManager extends EventTarget {
       case 'invite': {
         if (!GAMES[c.type]) return;
         if (!s) {
-          s = this.sessions[id] = { id, chatId, type: c.type, host: from, players: [from], status: 'lobby', seq: 0, state: null, ts: ts || Date.now() };
+          s = this.sessions[id] = { id, chatId, type: c.type, host: from, players: [from], pieces: {}, status: 'lobby', seq: 0, state: null, ts: ts || Date.now() };
+          if (PIECES[c.piece]) s.pieces[from] = c.piece;
           if (from !== me) this.card(s, `${this.app.nameOf(from)} wants to play ${GAMES[c.type].name}`);
           this.prune();
         }
@@ -161,11 +164,12 @@ export class GameManager extends EventTarget {
       case 'join':
         if (!s || s.chatId !== chatId || s.status !== 'lobby') return;
         if (!s.players.includes(from) && s.players.length < GAMES[s.type].max) s.players.push(from);
+        if (PIECES[c.piece]) (s.pieces ||= {})[from] = c.piece;
         break;
       case 'start':
         if (!s || s.chatId !== chatId || from !== s.host || s.status === 'done') return;
         if (!Array.isArray(c.players) || !c.players.includes(from) || !c.state) return;
-        s.players = c.players.slice(0, GAMES[s.type].max); s.state = c.state; s.seq = Number(c.seq) || 1; s.seed = Number(c.seed) || 0; s.status = 'playing'; s.ts = Date.now();
+        s.players = c.players.slice(0, GAMES[s.type].max); s.state = c.state; if (c.pieces && typeof c.pieces === 'object') s.pieces = Object.fromEntries(Object.entries(c.pieces).filter(([, v]) => PIECES[v])); s.seq = Number(c.seq) || 1; s.seed = Number(c.seed) || 0; s.status = 'playing'; s.ts = Date.now();
         break;
       case 'move':
         if (!s || s.chatId !== chatId || s.status !== 'playing' || !s.players.includes(from)) return;

@@ -2,7 +2,7 @@
 import { rng, esc, scoreStrip } from './util.js';
 import { isWord } from './words.js';
 
-export const meta = { name: 'Word Race', icon: '🔤', min: 2, max: 2, color: '#0ea5e9', blurb: 'Same letters, 90 seconds. Who finds more words?', series: 1, simul: true, isNew: true };
+export const meta = { name: 'Word Race', icon: '🔤', min: 2, max: 2, color: '#0ea5e9', blurb: 'Same letters, 90 seconds. Who finds more words?', series: 1, simul: true };
 const DICE = ['AAEEGN', 'ABBJOO', 'ACHOPS', 'AFFKPS', 'AOOTTW', 'CIMOTU', 'DEILRX', 'DELRVY', 'DISTTY', 'EEGHNW', 'EEINSU', 'EHRTVW', 'EIOSST', 'ELRTTY', 'HIMNQU', 'HLNNRZ'];
 const TIME = 90;
 export const points = (w) => (w.length <= 4 ? 1 : w.length === 5 ? 2 : w.length === 6 ? 3 : w.length === 7 ? 5 : 11);

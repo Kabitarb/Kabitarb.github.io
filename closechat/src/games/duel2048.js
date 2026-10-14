@@ -1,7 +1,7 @@
 // 2048 Duel — both players get the same tile sequence on their own board; highest score when time is up wins.
 import { rng, esc, scoreStrip } from './util.js';
 
-export const meta = { name: '2048 Duel', icon: '🔢', min: 2, max: 2, color: '#8b5cf6', blurb: 'Same tiles, two boards. Highest score in 2 minutes wins.', series: 1, simul: true, isNew: true };
+export const meta = { name: '2048 Duel', icon: '🔢', min: 2, max: 2, color: '#8b5cf6', blurb: 'Same tiles, two boards. Highest score in 2 minutes wins.', series: 1, simul: true };
 const N = 4, TIME = 120;
 
 function spawn(b, seed, pi, k) {

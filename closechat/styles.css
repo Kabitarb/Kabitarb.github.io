@@ -1503,3 +1503,65 @@ body.call-mini-voice #game.full .game-body { padding-top: calc(112px + var(--saf
 .arcade-btns { display: flex; gap: 10px; margin: 10px 0 6px; }
 #game.mini.arcade .game-body, #game.mini.arcade .arcade { display: none; }
 #game.full .game-body { padding-left: 4px; padding-right: 4px; }
+
+/* v12 Ludo: names in base corners, piece glyphs, realistic dice */
+.ludo .lname rect { fill: rgba(255,255,255,.94); stroke: var(--c); stroke-width: 2; }
+.ludo .lname text { fill: #1f2937; }
+.ludo .lname.turn rect { fill: var(--c); animation: lnamePulse 1.2s ease-in-out infinite; }
+.ludo .lname.turn text { fill: #fff; }
+.ludo .tok text { pointer-events: none; user-select: none; }
+.ludo .tok { transition: transform .35s var(--ios); }
+@keyframes lnamePulse { 0%, 100% { filter: drop-shadow(0 0 0 transparent); } 50% { filter: drop-shadow(0 0 10px var(--c)); } }
+.dice { width: 72px; height: 72px; perspective: 320px; }
+.dice .cube { inset: 12px; transition: transform .9s cubic-bezier(.22,1.2,.36,1); }
+.dice.rolling .cube { animation: tumble3 1.1s cubic-bezier(.17,.67,.3,1) both; }
+@keyframes tumble3 {
+  0% { transform: translateY(0) rotateX(0) rotateY(0) rotateZ(0); }
+  20% { transform: translateY(-26px) rotateX(200deg) rotateY(140deg) rotateZ(40deg); }
+  45% { transform: translateY(2px) rotateX(420deg) rotateY(330deg) rotateZ(90deg); }
+  60% { transform: translateY(-10px) rotateX(540deg) rotateY(410deg) rotateZ(120deg); }
+  75% { transform: translateY(0) rotateX(690deg) rotateY(520deg) rotateZ(170deg); }
+  88% { transform: translateY(-3px) rotateX(715deg) rotateY(560deg) rotateZ(178deg); }
+  100% { transform: translateY(0) rotateX(708deg) rotateY(550deg) rotateZ(180deg); }
+}
+#game.full .g-ludo .ludo-bar { width: 100%; justify-content: center; }
+
+/* v12 Play tab, pass & play setup, piece picker, Snakes & Ladders */
+.play { padding: 4px 12px 24px; }
+.play-sec { margin-top: 14px; } .play-sec h4 { margin: 0 0 2px; font-size: 17px; letter-spacing: -.01em; } .play-sec p { margin: 0 0 10px; }
+.play-grid.gpick { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+.play-grid .gtile { text-align: left; }
+.piece-row { display: flex; gap: 6px; flex-wrap: wrap; }
+.piece-row button { width: 40px; height: 40px; border-radius: 12px; background: var(--bg3); border: 2px solid transparent; font-size: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--fg); }
+.piece-row button.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--bg3)); transform: scale(1.06); }
+.piece-pick { display: flex; flex-direction: column; gap: 6px; margin: -4px 0 12px; }
+.lp { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.lp h3 { margin: 4px 0 0; } .lp .muted { margin: 0; }
+.lp-count { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.lp-count .chip.on { background: var(--accent); color: #fff; border-color: transparent; }
+.lp-players { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 340px; }
+.lp-row { display: flex; align-items: center; gap: 10px; background: var(--bg3); border-radius: 14px; padding: 6px 8px 6px 12px; }
+.lp-row i { width: 14px; height: 14px; border-radius: 50%; background: var(--c); flex: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 30%, transparent); }
+.lp-row input { flex: 1; min-width: 0; background: none; border: 0; color: var(--fg); font-size: 16px; padding: 8px 0; outline: none; }
+.lp-piece { width: 40px; height: 40px; border-radius: 12px; background: var(--bg2); border: 1px solid var(--line); font-size: 20px; color: var(--fg); }
+.lp .btn.primary { width: 100%; max-width: 340px; margin-top: 6px; }
+.snl { width: 100%; max-width: 440px; aspect-ratio: 1 / 1.0; overflow: visible; height: auto; display: block; margin: 0 auto; border-radius: 14px; }
+#game.full .snl { max-width: var(--bmax); }
+.snl text { pointer-events: none; user-select: none; }
+.snl .tok { transform: translate(var(--tx), var(--ty)); transition: transform .35s var(--ios); will-change: transform; }
+.snl .tok.turn circle:nth-child(2) { animation: glow 1s infinite alternate; }
+.snl .tok.moving { filter: drop-shadow(0 6px 6px rgba(0,0,0,.45)); }
+.snl-players { display: flex; gap: 8px; flex-wrap: wrap; font-size: 13px; color: var(--fg2); margin-bottom: 6px; justify-content: center; }
+.snl-player { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 10px; border: 1px solid transparent; background: var(--bg3); }
+.snl-player i { width: 10px; height: 10px; border-radius: 50%; background: var(--c); display: inline-block; }
+.snl-player.active { color: var(--fg); border-color: var(--c); font-weight: 700; }
+#game.full .g-snakes .ludo-bar { width: 100%; justify-content: center; }
+@media (prefers-reduced-motion: reduce) { .snl .tok { transition: none; } .ludo .lname.turn rect { animation: none; } }
+
+.g-score.many { flex-wrap: wrap; gap: 6px 8px; }
+.g-score.many .g-vs { display: none; }
+.g-score.many .g-player { padding: 4px 8px; }
+
+.tabbar { overflow: hidden; }
+.tabbar button { flex: 1 1 0; min-width: 0; padding-inline: 2px; font-size: 10.5px; }
+.tabbar button span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

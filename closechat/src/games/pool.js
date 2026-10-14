@@ -207,7 +207,9 @@ export function view(ctx) {
     g.strokeStyle = '#3b82f6'; g.lineWidth = 6; g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx - Math.cos(ang) * 4, sy - Math.sin(ang) * 4); g.stroke();
   }
   function draw(balls, opts = {}) {
-    if (!cv) return; fit(); table();
+    if (!cv) return; fit();
+    if (zoom > 0.001) { const cue = balls.find((b) => b.n === 0); if (cue) { const z = 1 + zoom; g.translate(cue.x, cue.y); g.scale(z, z); g.translate(-cue.x, -cue.y); } }
+    table();
     const mine = s0 && !playing && s0.players[s0.state.turn] === ctx.pk && !engine.over(s0.state);
     if (mine && !opts.noGuide) guide(balls, aimAng, pull ? pull.pow : pow);
     for (const b of balls) if (b.on) ball(b);
@@ -230,13 +232,16 @@ export function view(ctx) {
     };
     raf = requestAnimationFrame(tick);
   }
-  function pos(e) { const r = cv.getBoundingClientRect(); const sx = e.clientX - r.left, sy = e.clientY - r.top; return rot ? [sy / r.height * W, H - sx / r.width * H] : [sx / r.width * W, sy / r.height * H]; }
+  function pos(e) { const r = cv.getBoundingClientRect(); const sx = e.clientX - r.left, sy = e.clientY - r.top; let [x, y] = rot ? [sy / r.height * W, H - sx / r.width * H] : [sx / r.width * W, sy / r.height * H]; if (zoom > 0.001 && s0) { const cue = s0.state.balls.find((b) => b.n === 0); const z = 1 + zoom; x = cue.x + (x - cue.x) / z; y = cue.y + (y - cue.y) / z; } return [x, y]; }
   function myTurn() { return s0 && !playing && s0.players[s0.state.turn] === ctx.pk && !engine.over(s0.state); }
   function shoot(ang, pw) {
     const shot = { ang: Math.round(ang * 1000) / 1000, pow: Math.round(Math.max(0.08, Math.min(1, pw)) * 100) / 100, spin: spin.x || spin.y ? { ...spin } : undefined };
     pull = null; pow = 0; setPower(0); ctx.haptic(20); ctx.move(shot);
   }
-  function setPower(p) { const bar = el && el.querySelector('#pool-power i'); if (bar) bar.style.setProperty('--p', Math.round(p * 100)); const lbl = el && el.querySelector('#pool-power-lbl'); if (lbl) lbl.textContent = p > 0 ? `${Math.round(p * 100)}%` : 'Power'; }
+  let zoom = 0, zoomT = 0, zoomRaf = 0;
+  function zoomTick() { zoom += (zoomT - zoom) * 0.16; if (Math.abs(zoomT - zoom) < 0.003) zoom = zoomT; else zoomRaf = requestAnimationFrame(zoomTick); if (!playing && s0 && cv) draw(s0.state.balls); }
+  function setZoom(t) { if (ctx.reduced) t = 0; zoomT = t; cancelAnimationFrame(zoomRaf); zoomRaf = requestAnimationFrame(zoomTick); }
+  function setPower(p) { setZoom(p * 0.55); const bar = el && el.querySelector('#pool-power i'); if (bar) bar.style.setProperty('--p', Math.round(p * 100)); const lbl = el && el.querySelector('#pool-power-lbl'); if (lbl) lbl.textContent = p > 0 ? `${Math.round(p * 100)}%` : 'Power'; }
   function autoAim(st) {
     const cue = st.balls.find((b) => b.n === 0); const mine = st.groups[ctx.my];
     const targets = st.balls.filter((b) => b.on && b.n && (mine ? typeOf(b.n) === mine || (typeOf(b.n) === 'eight' && !st.balls.some((x) => x.on && typeOf(x.n) === mine)) : b.n !== 8));
@@ -275,7 +280,7 @@ export function view(ctx) {
         cv.onpointermove = (e) => {
           if (!s0 || !myTurn()) return; const [x, y] = pos(e); const cue = s0.state.balls.find((b) => b.n === 0);
           if (drag) { if (free(s0.state.balls, x, y)) { cue.x = x; cue.y = y; } draw(s0.state.balls, { noGuide: true }); }
-          else if (pull) { const dx = x - cue.x, dy = y - cue.y; pull.ang = Math.atan2(-dy, -dx); aimAng = pull.ang; pull.pow = Math.min(1, Math.max(0.08, Math.hypot(dx, dy) / 240)); setPower(pull.pow); draw(s0.state.balls); }
+          else if (pull) { const dx = x - cue.x, dy = y - cue.y; pull.ang = Math.atan2(-dy, -dx); aimAng = pull.ang; pull.pow = Math.min(1, Math.max(0.08, Math.pow(Math.hypot(dx, dy) / 400, 1.35))); setPower(pull.pow); draw(s0.state.balls); }
           else if (e.buttons) { aimAng = Math.atan2(y - cue.y, x - cue.x); draw(s0.state.balls); }
         };
         cv.onpointerup = () => {
@@ -296,6 +301,6 @@ export function view(ctx) {
         play(snapshot, st.last, () => { finish(); if (st.last.foul) ctx.fx(150, 0.3, 0.1, 0.06, 'sawtooth'); });
       } else finish();
     },
-    unmount() { cancelAnimationFrame(raf); if (ro) ro.disconnect(); ro = null; cv = null; el = null; snapshot = null; seen = -1; playing = false; },
+    unmount() { cancelAnimationFrame(raf); cancelAnimationFrame(zoomRaf); zoom = zoomT = 0; if (ro) ro.disconnect(); ro = null; cv = null; el = null; snapshot = null; seen = -1; playing = false; },
   };
 }
