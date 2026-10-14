@@ -16,6 +16,7 @@ export const KIND_TEXT = 14;
 export const KIND_IMAGE = 15;
 export const KIND_STICKER = 16;
 export const KIND_VIDEO = 17;        // video message header (JSON meta, poster)
+export const KIND_AUDIO = 19;        // voice message header (JSON meta + waveform)
 export const KIND_CHUNK = 18;        // one piece of a chunked media payload
 export const KIND_CONTROL = 30;
 export const DIRECTORY_KIND = 30078; // public username -> identity pointer (opt-in)

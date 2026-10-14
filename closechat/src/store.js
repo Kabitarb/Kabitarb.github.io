@@ -34,6 +34,8 @@ async function kvDel(key) {
   });
 }
 
+export async function hasState(pubkey) { try { return !!(await kvGet('state:' + pubkey)); } catch { return false; } }
+
 export function emptyState() {
   return {
     version: 2,

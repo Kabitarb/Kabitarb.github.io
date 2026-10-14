@@ -50,6 +50,27 @@ export class Transport {
     this.reportStatus();
   }
 
+  // Drop every socket (even ones that still claim to be open — after a freeze
+  // they are often half-dead) and dial again.
+  async hardReconnect() {
+    for (const u of this.relays) {
+      const r = this.pool.relays.get(u) || this.pool.relays.get(u.replace(/\/?$/, '/'));
+      if (r) { try { r.close(); } catch {} }
+      this.pool.relays.delete(u); this.pool.relays.delete(u.replace(/\/?$/, '/'));
+    }
+    await Promise.allSettled(this.relays.map((u) => this.pool.ensureRelay(u, { connectionTimeout: 8000 })));
+    this.reportStatus();
+  }
+
+  // True when at least one relay answers a tiny query in time; false means the
+  // sockets look open but nothing flows (typical after iOS backgrounding).
+  async probe(maxWait = 7000) {
+    try {
+      const evs = await this.pool.querySync(this.relays, { kinds: [DIRECTORY_KIND], limit: 1 }, { maxWait });
+      return evs.length > 0;
+    } catch { return false; }
+  }
+
   // Subscribe to everything addressed to us. `since` is the newest stored
   // wrap we already have (minus slack for randomized timestamps).
   listen(pubkey, since, onWrap, onEose) {
@@ -96,6 +117,13 @@ export class Transport {
   }
 
   // Newest encrypted account backup published by this identity (or null).
+  // Every directory record ever published under a username (including the empty
+  // "hidden from search" ones) — the username is claimed by each of those pubkeys.
+  async claims(username) {
+    const evs = await this.pool.querySync(this.relays, { kinds: [DIRECTORY_KIND], '#d': [directoryTag(username)] }, { maxWait: 6000 });
+    return [...new Set(evs.filter((ev) => verifyEvent(ev)).map((ev) => ev.pubkey))];
+  }
+
   async fetchBackup(pk, tag) {
     const evs = await this.pool.querySync(this.relays, { kinds: [DIRECTORY_KIND], authors: [pk], '#d': [tag] }, { maxWait: 7000 });
     let best = null;
