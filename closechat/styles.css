@@ -1557,3 +1557,7 @@ body.call-mini-voice #game.full .game-body { padding-top: calc(112px + var(--saf
 .snl-player.active { color: var(--fg); border-color: var(--c); font-weight: 700; }
 #game.full .g-snakes .ludo-bar { width: 100%; justify-content: center; }
 @media (prefers-reduced-motion: reduce) { .snl .tok { transition: none; } .ludo .lname.turn rect { animation: none; } }
+
+.g-score.many { flex-wrap: wrap; gap: 6px 8px; }
+.g-score.many .g-vs { display: none; }
+.g-score.many .g-player { padding: 4px 8px; }

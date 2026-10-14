@@ -2379,7 +2379,7 @@ class LocalGames {
   quit(id) { const s = this.get(id); if (s) s.status = 'done'; }
 }
 const localGames = new LocalGames();
-const G_ = () => (openGameId && String(openGameId).startsWith('local') ? localGames : games);
+const G_ = (id = openGameId) => (id && String(id).startsWith('local') ? localGames : games);
 const LOCAL_SETUP_KEY = 'chatly:local:setup';
 function openLocalSetup(type) {
   const G = GAMES[type]; if (!G) return;
@@ -2444,7 +2444,7 @@ function renderGameFoot(s) {
 }
 let gameMini = false;
 function openGame(id) {
-  const s = G_().get(id); if (!s) return;
+  const s = G_(id).get(id); if (!s) return;
   if (arcadeOpen) closeGamePanel();
   openGameId = id; gameMini = false;
   if (s.status === 'lobby' && !s.players.includes(app.pk)) { try { G_().join(id); } catch (e) { toast(e.message, 'error'); } }
@@ -2490,7 +2490,7 @@ $('game-mini-leave').onclick = (e) => { e.stopPropagation(); leaveGame(); };
 let lastDone = null, gameView = null, gameViewFor = null;
 function dropGameView() { if (gameView) { try { gameView.unmount(); } catch {} } gameView = null; gameViewFor = null; }
 function gameCtx(s) {
-  if (s.local) return { get my() { return ENGINES[s.type].over(s.state) ? -1 : s.state.turn; }, get pk() { return ENGINES[s.type].over(s.state) ? '' : s.players[s.state.turn]; }, local: true, nameOf: (p) => pname(s, p), avatar: avatarHtml, move: (mv) => localGames.move(s.id, mv), haptic, fx, confetti, toast, reduced: reducedMotion() };
+  if (s.local) return { get my() { return ENGINES[s.type].over(s.state) ? -1 : s.state.turn; }, get pk() { return ENGINES[s.type].over(s.state) ? '' : s.players[s.state.turn]; }, local: true, nameOf: (p) => pname(s, p), avatar: (p, cls) => avatarHtml(p, cls, pname(s, p)), move: (mv) => localGames.move(s.id, mv), haptic, fx, confetti, toast, reduced: reducedMotion() };
   return { my: games.myIndex(s), pk: app.pk, nameOf: (p) => (p === app.pk ? 'You' : app.nameOf(p)), avatar: avatarHtml, move: (mv) => games.move(s.id, mv), haptic, fx, confetti, toast, reduced: reducedMotion() };
 }
 // Arcade (solo open-source games in a sandboxed iframe) shares the fullscreen shell, mini bar and HUD pill.

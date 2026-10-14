@@ -34,6 +34,6 @@ export function turnText(ctx, s, over) {
 // Score strip: avatar + name + wins for each player, active one highlighted.
 export function scoreStrip(ctx, s, over, marks = []) {
   const st = s.state;
-  return `<div class="g-score">${s.players.map((p, i) => `<div class="g-player ${!over && st.turn === i ? 'active' : ''} ${i === ctx.my ? 'me' : ''}" style="--pc:${PLAYER_COLORS[i % PLAYER_COLORS.length]}">${ctx.avatar(p, 'sm')}<span class="g-pname">${esc(ctx.nameOf(p))}</span>${marks[i] ? `<span class="g-mark">${marks[i]}</span>` : ''}<b class="g-wins">${(st.score && st.score[i]) || 0}</b></div>`).join('<span class="g-vs">vs</span>')}</div>`;
+  return `<div class="g-score ${s.players.length > 2 ? 'many' : ''}">${s.players.map((p, i) => `<div class="g-player ${!over && st.turn === i ? 'active' : ''} ${i === ctx.my ? 'me' : ''}" style="--pc:${PLAYER_COLORS[i % PLAYER_COLORS.length]}">${ctx.avatar(p, 'sm')}<span class="g-pname">${esc(ctx.nameOf(p))}</span>${marks[i] ? `<span class="g-mark">${marks[i]}</span>` : ''}<b class="g-wins">${(st.score && st.score[i]) || 0}</b></div>`).join('<span class="g-vs">vs</span>')}</div>`;
 }
 export const PLAYER_COLORS = ['#3b82f6', '#f43f5e', '#f59e0b', '#10b981'];
