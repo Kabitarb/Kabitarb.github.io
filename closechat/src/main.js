@@ -12,6 +12,9 @@ import { REACTIONS } from './games/manager.js';
 import { PACKS, stickerIds, stickerSvg, animIds, animOf, animHtml } from './stickers.js';
 import { GameManager, GAMES, VIEWS, GAME_ORDER } from './games.js';
 import { ARCADE, ARCADE_ORDER, bestScore, recordScore } from './arcade.js';
+import { ENGINES } from './games/registry.js';
+import { randSeed } from './games/util.js';
+import { PIECES, PIECE_KEY, myPiece, LUDO_COLORS } from './games/ludo.js';
 import { ShareManager } from './share.js';
 import { WatchManager, parseMedia, MEDIA_RE } from './watch.js';
 import { TV_CHANNELS, TV_CATS, tvUrl, tvHue } from './tv.js';
@@ -1136,9 +1139,10 @@ document.querySelectorAll('.tabbar button').forEach((b) => {
     currentTab = b.dataset.tab;
     document.querySelector('.side-body').scrollTop = 0; $('side').classList.remove('compact');
     document.querySelectorAll('.tabbar button').forEach((x) => x.classList.toggle('active', x === b));
-    const order = ['chats', 'friends', 'calls', 'requests', 'settings']; const dir = order.indexOf(currentTab) >= order.indexOf(prevTab) ? 'enter-r' : 'enter-l'; prevTab = currentTab;
+    const order = ['chats', 'friends', 'calls', 'play', 'requests', 'settings']; const dir = order.indexOf(currentTab) >= order.indexOf(prevTab) ? 'enter-r' : 'enter-l'; prevTab = currentTab;
     document.querySelectorAll('.tab-pane').forEach((p) => { const show = p.dataset.pane === currentTab; p.classList.toggle('hidden', !show); p.classList.remove('enter-r', 'enter-l'); if (show && !reducedMotion()) { void p.offsetWidth; p.classList.add(dir); } });
-    $('side-title').textContent = { chats: 'Chats', friends: 'Friends', calls: 'Calls', requests: 'Requests', settings: 'Settings' }[currentTab];
+    $('side-title').textContent = { chats: 'Chats', friends: 'Friends', calls: 'Calls', play: 'Play', requests: 'Requests', settings: 'Settings' }[currentTab];
+    if (currentTab === 'play') renderPlay();
     $('fab-new').classList.toggle('hidden', currentTab !== 'chats');
   };
 });
@@ -2055,10 +2059,11 @@ const url = await promptSheet('Watch together', '', 'Paste an Instagram reel / Y
 async function openGames(id) {
   if (!id) return;
   const active = games.forChat(id);
-  showModal(`<h3>Games</h3><div class="menu gpick">
+  showModal(`<h3>Games</h3><div class="piece-pick"><span class="tiny muted">Your piece</span>${pieceRowHtml()}</div><div class="menu gpick">
     ${active.map((s) => `<button class="gactive" data-mi="g:${s.id}"><span class="gicon">${GAMES[s.type].icon}</span><b>${s.status === 'lobby' ? 'Join' : 'Open'} ${esc(GAMES[s.type].name)}</b><small>${s.players.length} player${s.players.length === 1 ? '' : 's'} · ${s.status === 'lobby' ? 'in lobby' : 'playing'}</small></button>`).join('')}
     ${GAME_ORDER.map((t, i) => `<button class="gtile" data-mi="${t}" style="--gc:${GAMES[t].color};--i:${i}"><span class="gicon">${GAMES[t].icon}</span>${GAMES[t].isNew ? '<em class="gnew">NEW</em>' : ''}<b>${esc(GAMES[t].name)}</b><small>${esc(GAMES[t].blurb)}</small></button>`).join('')}<h4 class="gsec">Arcade <span>solo · share your score</span></h4>
     ${ARCADE_ORDER.map((t, i) => `<button class="gtile arc" data-mi="a:${t}" style="--gc:${ARCADE[t].color};--i:${GAME_ORDER.length + i}"><span class="gicon">${ARCADE[t].icon}</span>${bestScore(t) ? `<em class="gbest">Best ${bestScore(t)}</em>` : '<em class="gnew">NEW</em>'}<b>${esc(ARCADE[t].name)}</b><small>${esc(ARCADE[t].blurb)}</small></button>`).join('')}</div>${leaderboardHtml(id)}`);
+  wirePieceRow($('modal-body'));
   $('modal-body').querySelectorAll('[data-mi]').forEach((b) => { b.onclick = () => {
     const act = b.dataset.mi; hideModal(); haptic();
     if (act.startsWith('g:')) openGame(act.slice(2));
@@ -2341,37 +2346,110 @@ function floatEmoji(emo, mine) {
   el.animate([{ transform: 'translateY(0) scale(.6)', opacity: 0 }, { transform: 'translateY(-40px) scale(1.3)', opacity: 1, offset: 0.2 }, { transform: 'translateY(-220px) scale(1)', opacity: 0 }], { duration: 1600, easing: 'cubic-bezier(.2,.7,.3,1)' }).onfinish = () => el.remove();
 }
 let gameTimerIv = 0, nudgedFor = '';
+// Pass & play: one phone, players take turns. Same engines/views as online games; the "viewer" is whoever's turn it is.
+export const LOCAL_GAMES = ['ludo', 'snakes', 'ttt', 'connect4', 'checkers', 'dots', 'pool', 'cuppong'];
+const pname = (s, p) => (s.local ? (s.names[s.players.indexOf(p)] || 'Player') : p === app.pk ? 'You' : app.nameOf(p));
+const chatLabel = (s) => (s.local ? 'Pass & play' : app.nameOf(s.chatId));
+class LocalGames {
+  constructor() { this.s = null; this.setup = null; }
+  get(id) { return this.s && this.s.id === id ? this.s : null; }
+  engine(s) { return ENGINES[s.type]; }
+  myIndex() { return -1; }
+  isOver(s) { return s.status === 'playing' && !!s.state && this.engine(s).over(s.state); }
+  isMyTurn(s) { return s.status === 'playing' && !this.isOver(s); }
+  turnDeadline() { return 0; } canUndo() { return false; } requestUndo() { return false; } answerUndo() {} react() {} join() {} forChat() { return []; } stats() { return {}; }
+  seriesWinner(s) { const n = GAMES[s.type]?.series, sc = s.state?.score; if (!(n > 1) || !Array.isArray(sc) || !this.engine(s).over(s.state)) return -1; return sc.findIndex((x) => x >= Math.ceil(n / 2)); }
+  hint(id) { const s = this.get(id); if (!s || !this.isMyTurn(s)) return null; const E = this.engine(s); s.hint = (E.hint && E.hint(s.state, s.state.turn)) || null; renderGame(); return s.hint; }
+  legal(id) { const s = this.get(id); const E = s && this.engine(s); return s && s.status === 'playing' && E.legal ? E.legal(s.state, s.state.turn) : []; }
+  start(type, setup) {
+    const names = setup.names.map((n, i) => (n || '').trim() || `Player ${i + 1}`);
+    this.setup = { type, names, pieces: setup.pieces || [] };
+    const players = names.map((_, i) => 'local:' + i);
+    const s = { id: 'local' + Date.now().toString(36), chatId: 'local', type, host: players[0], players, names, local: true, pieces: Object.fromEntries(players.map((p, i) => [p, PIECES[setup.pieces?.[i]] ? setup.pieces[i] : 'coin'])), status: 'playing', seq: 1, state: ENGINES[type].init(names.length, randSeed()), ts: Date.now() };
+    this.s = s; return s;
+  }
+  invite(_chatId, type) { if (this.s && this.s.status !== 'done') this.s.status = 'done'; return this.start(type, this.setup || { names: ['Player 1', 'Player 2'] }); }
+  move(id, mv) {
+    const s = this.get(id); if (!s || s.status !== 'playing') return false;
+    const E = this.engine(s), pi = s.state.turn; let ok;
+    if (mv && mv.a === 'again') { if (!E.over(s.state) || !E.again || this.seriesWinner(s) >= 0) return false; E.again(s.state, pi); ok = true; } else ok = E.apply(s.state, pi, mv);
+    if (!ok) return false;
+    s.seq++; s.ts = Date.now(); delete s.hint; renderGame(); return true;
+  }
+  quit(id) { const s = this.get(id); if (s) s.status = 'done'; }
+}
+const localGames = new LocalGames();
+const G_ = () => (openGameId && String(openGameId).startsWith('local') ? localGames : games);
+const LOCAL_SETUP_KEY = 'chatly:local:setup';
+function openLocalSetup(type) {
+  const G = GAMES[type]; if (!G) return;
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem(LOCAL_SETUP_KEY) || '{}'); } catch {}
+  let n = Math.min(G.max, Math.max(G.min, saved.n || 2));
+  const names = Array.from({ length: 4 }, (_, i) => (saved.names && saved.names[i]) || `Player ${i + 1}`);
+  const pieces = Array.from({ length: 4 }, (_, i) => (saved.pieces && PIECES[saved.pieces[i]] ? saved.pieces[i] : ['coin', 'pawn', 'star', 'gem'][i]));
+  const hasPieces = type === 'ludo' || type === 'snakes';
+  const draw = () => {
+    showModal(`<div class="lp"><div class="lobby-hero" style="--gc:${G.color}"><span>${G.icon}</span></div><h3>${esc(G.name)}</h3><p class="muted">Pass &amp; play — everyone on this phone</p>
+      ${G.max > G.min ? `<div class="lp-count" role="radiogroup" aria-label="Players">${Array.from({ length: G.max - G.min + 1 }, (_, k) => G.min + k).map((k) => `<button class="chip ${k === n ? 'on' : ''}" data-n="${k}">${k} players</button>`).join('')}</div>` : `<p class="tiny muted">${G.max} players</p>`}
+      <div class="lp-players">${Array.from({ length: n }, (_, i) => `<div class="lp-row" style="--c:${LUDO_COLORS[i].fill}"><i></i><input data-i="${i}" maxlength="14" value="${esc(names[i])}" placeholder="Player ${i + 1}" aria-label="Player ${i + 1} name">${hasPieces ? `<button class="lp-piece" data-i="${i}" aria-label="Piece">${PIECES[pieces[i]].g || '●'}</button>` : ''}</div>`).join('')}</div>
+      <button class="btn primary" id="lp-start">Start</button></div>`);
+    const mb = $('modal-body');
+    mb.querySelectorAll('[data-n]').forEach((b) => { b.onclick = () => { readNames(); n = Number(b.dataset.n); haptic(); draw(); }; });
+    const readNames = () => mb.querySelectorAll('input[data-i]').forEach((inp) => { names[Number(inp.dataset.i)] = inp.value; });
+    mb.querySelectorAll('.lp-piece').forEach((b) => { b.onclick = () => { const i = Number(b.dataset.i); const keys = Object.keys(PIECES); pieces[i] = keys[(keys.indexOf(pieces[i]) + 1) % keys.length]; b.textContent = PIECES[pieces[i]].g || '●'; haptic(6); }; });
+    $('lp-start').onclick = () => {
+      readNames(); hideModal(); haptic(12);
+      localStorage.setItem(LOCAL_SETUP_KEY, JSON.stringify({ n, names, pieces }));
+      const s = localGames.start(type, { names: names.slice(0, n), pieces: pieces.slice(0, n) });
+      openGame(s.id);
+    };
+  };
+  draw();
+}
+function renderPlay() {
+  const host = $('play-pane'); if (!host) return;
+  host.innerHTML = `<section class="play-sec"><h4>Pass &amp; play</h4><p class="muted tiny">Play together on this one phone — take turns, no chat needed.</p>
+    <div class="menu gpick play-grid">${LOCAL_GAMES.map((t, i) => `<button class="gtile" data-lp="${t}" style="--gc:${GAMES[t].color};--i:${i}"><span class="gicon">${GAMES[t].icon}</span>${GAMES[t].isNew ? '<em class="gnew">NEW</em>' : ''}<b>${esc(GAMES[t].name)}</b><small>${GAMES[t].min === GAMES[t].max ? `${GAMES[t].max} players` : `${GAMES[t].min}–${GAMES[t].max} players`}</small></button>`).join('')}</div></section>
+    <section class="play-sec"><h4>Arcade</h4><p class="muted tiny">Solo open-source classics with personal bests.</p>
+    <div class="menu gpick play-grid">${ARCADE_ORDER.map((t, i) => `<button class="gtile arc" data-la="${t}" style="--gc:${ARCADE[t].color};--i:${i}"><span class="gicon">${ARCADE[t].icon}</span>${bestScore(t) ? `<em class="gbest">Best ${bestScore(t)}</em>` : ''}<b>${esc(ARCADE[t].name)}</b><small>${esc(ARCADE[t].blurb || '')}</small></button>`).join('')}</div></section>
+    <section class="play-sec"><h4>Your Ludo piece</h4><p class="muted tiny">Shown to friends in online Ludo and Snakes &amp; Ladders.</p>${pieceRowHtml()}</section>`;
+  host.querySelectorAll('[data-lp]').forEach((b) => { b.onclick = () => { haptic(); openLocalSetup(b.dataset.lp); }; });
+  host.querySelectorAll('[data-la]').forEach((b) => { b.onclick = () => { haptic(); openArcade(b.dataset.la, null); }; });
+  wirePieceRow(host, renderPlay);
+}
+function pieceRowHtml() { const cur = myPiece(); return `<div class="piece-row" role="radiogroup" aria-label="Your piece">${Object.entries(PIECES).map(([k, v]) => `<button class="${k === cur ? 'on' : ''}" data-piece="${k}" title="${v.name}" aria-label="${v.name}"><span>${v.g || '●'}</span></button>`).join('')}</div>`; }
+function wirePieceRow(root, after) { root.querySelectorAll('[data-piece]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); localStorage.setItem(PIECE_KEY, b.dataset.piece); haptic(8); root.querySelectorAll('[data-piece]').forEach((x) => x.classList.toggle('on', x === b)); if (after) after(); }; }); }
 function tickGameTimer() {
-  const s = games.get(openGameId); const t = document.getElementById('g-timer'); if (!s || !t) return;
-  const dl = games.turnDeadline(s); if (!dl) { t.classList.add('hidden'); return; }
-  const left = Math.max(0, Math.ceil((dl - Date.now()) / 1000)); const mine = games.isMyTurn(s);
+  const s = G_().get(openGameId); const t = document.getElementById('g-timer'); if (!s || !t) return;
+  const dl = G_().turnDeadline(s); if (!dl) { t.classList.add('hidden'); return; }
+  const left = Math.max(0, Math.ceil((dl - Date.now()) / 1000)); const mine = G_().isMyTurn(s);
   t.classList.remove('hidden'); t.classList.toggle('low', left <= 10); t.classList.toggle('mine', mine);
   t.innerHTML = left > 0 ? `<i></i>${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : mine ? '<i></i>Time\'s up — your move' : `<i></i><button class="link" id="g-nudge">Nudge ⏰</button>`;
-  const nb = document.getElementById('g-nudge'); if (nb) nb.onclick = () => { const k = s.id + ':' + s.seq; if (nudgedFor === k) { toast('Already nudged'); return; } nudgedFor = k; games.react(s.id, '⏰'); };
+  const nb = document.getElementById('g-nudge'); if (nb) nb.onclick = () => { const k = s.id + ':' + s.seq; if (nudgedFor === k) { toast('Already nudged'); return; } nudgedFor = k; G_().react(s.id, '⏰'); };
 }
 function renderGameFoot(s) {
   const foot = document.getElementById('g-foot'); if (!foot) return;
-  const E = games.engine(s), myTurn = games.isMyTurn(s), over = games.isOver(s), G = GAMES[s.type];
+  const E = G_().engine(s), myTurn = G_().isMyTurn(s), over = G_().isOver(s), G = GAMES[s.type];
   const u = s.undoReq && s.undoReq.from !== app.pk ? s.undoReq : null;
-  foot.innerHTML = `${u ? `<div class="g-undo-ask"><span>${esc(app.nameOf(u.from))} asks to undo their last move</span><button class="btn small primary" id="g-undo-yes">Allow</button><button class="btn small ghost" id="g-undo-no">No</button></div>` : ''}
+  foot.innerHTML = `${u ? `<div class="g-undo-ask"><span>${esc(pname(s, u.from))} asks to undo their last move</span><button class="btn small primary" id="g-undo-yes">Allow</button><button class="btn small ghost" id="g-undo-no">No</button></div>` : ''}
     <div class="g-tools"><span class="g-timer hidden" id="g-timer"></span>
     ${E.hint && !G.simul ? `<button class="chip ${myTurn && !over ? '' : 'dim'}" id="g-hint" ${myTurn && !over ? '' : 'disabled'} title="Suggest a move">💡 Hint</button>` : ''}
-    ${games.canUndo(s) && !over ? '<button class="chip" id="g-undo" title="Ask to take back your last move">↩ Undo</button>' : ''}
+    ${G_().canUndo(s) && !over ? '<button class="chip" id="g-undo" title="Ask to take back your last move">↩ Undo</button>' : ''}
     <span class="g-react">${REACTIONS.filter((e) => e !== '⏰').map((e) => `<button data-e="${e}" aria-label="React ${e}">${e}</button>`).join('')}</span></div>`;
-  const hb = document.getElementById('g-hint'); if (hb) hb.onclick = () => { haptic(); const h = games.hint(s.id); if (!h) toast('No hint available'); };
-  const ub = document.getElementById('g-undo'); if (ub) ub.onclick = () => { haptic(); if (games.requestUndo(s.id)) toast('Undo requested…'); };
-  if (u) { $('g-undo-yes').onclick = () => games.answerUndo(s.id, true); $('g-undo-no').onclick = () => games.answerUndo(s.id, false); }
-  foot.querySelectorAll('.g-react button').forEach((b) => { b.onclick = () => { haptic(8); games.react(s.id, b.dataset.e); }; });
+  const hb = document.getElementById('g-hint'); if (hb) hb.onclick = () => { haptic(); const h = G_().hint(s.id); if (!h) toast('No hint available'); };
+  const ub = document.getElementById('g-undo'); if (ub) ub.onclick = () => { haptic(); if (G_().requestUndo(s.id)) toast('Undo requested…'); };
+  if (u) { $('g-undo-yes').onclick = () => G_().answerUndo(s.id, true); $('g-undo-no').onclick = () => G_().answerUndo(s.id, false); }
+  foot.querySelectorAll('.g-react button').forEach((b) => { b.onclick = () => { haptic(8); G_().react(s.id, b.dataset.e); }; });
   tickGameTimer();
 }
 let gameMini = false;
 function openGame(id) {
-  const s = games.get(id); if (!s) return;
+  const s = G_().get(id); if (!s) return;
   if (arcadeOpen) closeGamePanel();
   openGameId = id; gameMini = false;
-  if (s.status === 'lobby' && !s.players.includes(app.pk)) { try { games.join(id); } catch (e) { toast(e.message, 'error'); } }
+  if (s.status === 'lobby' && !s.players.includes(app.pk)) { try { G_().join(id); } catch (e) { toast(e.message, 'error'); } }
   if (calls && calls.state !== 'idle' && !callMini) setCallMini(true);
-  if (s.chatId !== app.openChat) openChat(s.chatId);
+  if (!s.local && s.chatId !== app.openChat) openChat(s.chatId);
   $('game').classList.remove('hidden');
   renderGame();
 }
@@ -2403,15 +2481,16 @@ $('game').addEventListener('keydown', gameActive);
 $('game-mini-bar').onclick = (e) => { if (!e.target.closest('#game-mini-leave')) setGameMini(false); };
 async function leaveGame() {
   if (arcadeOpen) { closeGamePanel(); return; }
-  const s = games.get(openGameId); if (!s) return;
-  const finished = s.status === 'done' || (games.isOver(s) && !(GAMES[s.type].series > 1));
-  if (finished || await confirmSheet('Leave game?', 'The game ends for everyone.', 'Leave')) { if (s.status !== 'done') games.quit(s.id); if (openGameId === s.id) closeGamePanel(); }
+  const s = G_().get(openGameId); if (!s) return;
+  const finished = s.status === 'done' || (G_().isOver(s) && !(GAMES[s.type].series > 1));
+  if (finished || await confirmSheet('Leave game?', s.local ? 'Progress on this phone is lost.' : 'The game ends for everyone.', 'Leave')) { if (s.status !== 'done') G_().quit(s.id); if (openGameId === s.id) closeGamePanel(); }
 }
 $('game-quit').onclick = leaveGame;
 $('game-mini-leave').onclick = (e) => { e.stopPropagation(); leaveGame(); };
 let lastDone = null, gameView = null, gameViewFor = null;
 function dropGameView() { if (gameView) { try { gameView.unmount(); } catch {} } gameView = null; gameViewFor = null; }
 function gameCtx(s) {
+  if (s.local) return { get my() { return ENGINES[s.type].over(s.state) ? -1 : s.state.turn; }, get pk() { return ENGINES[s.type].over(s.state) ? '' : s.players[s.state.turn]; }, local: true, nameOf: (p) => pname(s, p), avatar: avatarHtml, move: (mv) => localGames.move(s.id, mv), haptic, fx, confetti, toast, reduced: reducedMotion() };
   return { my: games.myIndex(s), pk: app.pk, nameOf: (p) => (p === app.pk ? 'You' : app.nameOf(p)), avatar: avatarHtml, move: (mv) => games.move(s.id, mv), haptic, fx, confetti, toast, reduced: reducedMotion() };
 }
 // Arcade (solo open-source games in a sandboxed iframe) shares the fullscreen shell, mini bar and HUD pill.
@@ -2442,24 +2521,24 @@ window.addEventListener('message', (e) => {
   const A = ARCADE[arcadeOpen.id], score = Math.max(0, Math.round(Number(d.score) || 0)); const r = recordScore(arcadeOpen.id, score); arcadeOpen.score = score;
   const ov = $('arcade-over'); if (!ov) return;
   ov.innerHTML = `<div class="arcade-card"><span class="arcade-ic">${A.icon}</span><h3>${r.newBest ? 'New best!' : 'Game over'}</h3><div class="arcade-score">${score.toLocaleString()}</div><div class="muted">${esc(A.name)} · best ${r.best.toLocaleString()}</div>
-    <div class="arcade-btns"><button class="btn primary" id="arcade-share">Share score</button><button class="btn" id="arcade-again">Play again</button></div>
+    <div class="arcade-btns">${arcadeOpen.chatId ? '<button class="btn primary" id="arcade-share">Share score</button>' : ''}<button class="btn" id="arcade-again">Play again</button></div>
     <small class="tiny muted">Open source: ${esc(A.license)}</small></div>`;
   ov.classList.remove('hidden'); haptic(20); fx(880, 0.12, 0, 0.08); fx(1320, 0.14, 0.12, 0.08);
-  $('arcade-share').onclick = async () => { const chat = arcadeOpen.chatId; if (!chat) return; try { await app.sendMessage(chat, { text: `${A.icon} ${A.name}: ${score.toLocaleString()} pts${r.newBest ? ' · new personal best' : ''} — beat me? (Games → Arcade)` }); toast('Score shared'); } catch (err) { toast(err.message, 'error'); } ov.classList.add('hidden'); };
+  const shareBtn = $('arcade-share'); if (shareBtn) shareBtn.onclick = async () => { const chat = arcadeOpen.chatId; if (!chat) return; try { await app.sendMessage(chat, { text: `${A.icon} ${A.name}: ${score.toLocaleString()} pts${r.newBest ? ' · new personal best' : ''} — beat me? (Games → Arcade)` }); toast('Score shared'); } catch (err) { toast(err.message, 'error'); } ov.classList.add('hidden'); };
   $('arcade-again').onclick = () => { ov.classList.add('hidden'); const f = $('arcade-frame'); if (f) f.focus(); };
   if (gameMini) renderArcade();
 });
 function renderGame() {
   if (arcadeOpen) { renderArcade(); return; }
-  const s = games.get(openGameId); if (!s) { closeGamePanel(); return; }
+  const s = G_().get(openGameId); if (!s) { closeGamePanel(); return; }
   const G = GAMES[s.type];
   const panel = $('game');
-  $('game-title').textContent = `${G.icon} ${G.name} · ${app.nameOf(s.chatId)}`;
+  $('game-title').textContent = `${G.icon} ${G.name} · ${chatLabel(s)}`;
   $('game-quit').textContent = s.status === 'done' ? 'Close' : 'Leave';
   const body = $('game-body');
-  const my = games.myIndex(s);
-  const myTurn = games.isMyTurn(s);
-  const over = games.isOver(s);
+  const my = G_().myIndex(s);
+  const myTurn = G_().isMyTurn(s);
+  const over = G_().isOver(s);
   panel.classList.toggle('mini', gameMini);
   const wasFull = panel.classList.contains('full');
   panel.classList.toggle('full', !gameMini && s.status !== 'lobby');
@@ -2467,8 +2546,8 @@ function renderGame() {
   panel.classList.toggle('turn', gameMini && myTurn);
   panel.dataset.game = s.type;
   $('game-mini-icon').textContent = G.icon;
-  $('game-mini-title').textContent = `${G.name} · ${app.nameOf(s.chatId)}`;
-  $('game-mini-sub').textContent = s.status === 'lobby' ? 'Waiting in lobby · tap to return' : s.status === 'done' || over ? 'Game over · tap to return' : myTurn ? 'Your turn! Tap to play' : `${s.state && s.players[s.state.turn] ? esc(app.nameOf(s.players[s.state.turn])) + "'s turn" : 'Waiting'} · tap to watch`;
+  $('game-mini-title').textContent = `${G.name} · ${chatLabel(s)}`;
+  $('game-mini-sub').textContent = s.status === 'lobby' ? 'Waiting in lobby · tap to return' : s.status === 'done' || over ? 'Game over · tap to return' : myTurn ? 'Your turn! Tap to play' : `${s.state && s.players[s.state.turn] ? esc(pname(s, s.players[s.state.turn])) + "'s turn" : 'Waiting'} · tap to watch`;
   $('game-mini-leave').textContent = s.status === 'done' ? 'Close' : 'Leave';
   if (gameMini) return;
   if (s.status !== 'playing') dropGameView();
@@ -2476,18 +2555,18 @@ function renderGame() {
     const host = s.host === app.pk;
     body.innerHTML = `<div class="lobby"><div class="lobby-hero" style="--gc:${G.color}"><span>${G.icon}</span></div><h3>${esc(G.name)}</h3><p class="muted">${esc(G.blurb)}</p>
       <div class="game-status">${host ? (s.players.length < G.min ? 'Waiting for friends to join…' : 'Ready when you are') : `Waiting for ${esc(app.nameOf(s.host))} to start…`}</div>
-      <div class="players">${s.players.map((p) => `<div>${avatarHtml(p, 'sm')}<span>${esc(p === app.pk ? 'You' : app.nameOf(p))}${p === s.host ? ' <span class="tiny muted">host</span>' : ''}</span></div>`).join('')}</div>
+      <div class="players">${s.players.map((p) => `<div>${avatarHtml(p, 'sm')}<span>${esc(pname(s, p))}${p === s.host ? ' <span class="tiny muted">host</span>' : ''}</span></div>`).join('')}</div>
       <p class="tiny muted">${G.min === G.max ? `${G.max} players` : `${G.min}–${G.max} players`} · ${s.players.length} joined</p>
       ${host ? `<button class="btn primary" id="game-start" ${s.players.length < G.min ? 'disabled' : ''}>Start game</button>` : ''}</div>`;
-    if (host) $('game-start').onclick = () => { try { games.start(s.id); } catch (e) { toast(e.message, 'error'); } };
+    if (host) $('game-start').onclick = () => { try { G_().start(s.id); } catch (e) { toast(e.message, 'error'); } };
     return;
   }
   if (s.status === 'done') {
     const w = s.state && s.state.winner;
-    body.innerHTML = `<div class="game-panel-done">${s.quitBy ? `${esc(s.quitBy === app.pk ? 'You' : app.nameOf(s.quitBy))} left the game` : w !== null && w !== undefined && w >= 0 ? `🏆 ${esc(w === my ? 'You won!' : app.nameOf(s.players[w]) + ' won')}` : 'Game over'}
-      ${s.state && s.state.score ? `<div class="g-series">${s.players.map((p, i) => `${esc(p === app.pk ? 'You' : app.nameOf(p))} ${s.state.score[i] || 0}`).join(' · ')}</div>` : ''}
+    body.innerHTML = `<div class="game-panel-done">${s.quitBy ? `${esc(pname(s, s.quitBy))} left the game` : w !== null && w !== undefined && w >= 0 ? `🏆 ${esc(w === my ? 'You won!' : pname(s, s.players[w]) + ' won')}` : 'Game over'}
+      ${s.state && s.state.score ? `<div class="g-series">${s.players.map((p, i) => `${esc(pname(s, p))} ${s.state.score[i] || 0}`).join(' · ')}</div>` : ''}
       <button class="btn primary" id="game-again">Play again</button>`;
-    $('game-again').onclick = () => { try { const n = games.invite(s.chatId, s.type); openGame(n.id); } catch (e) { toast(e.message, 'error'); } };
+    $('game-again').onclick = () => { try { const n = G_().invite(s.chatId, s.type); openGame(n.id); } catch (e) { toast(e.message, 'error'); } };
     return;
   }
   const key = s.id + ':' + s.players.length;
@@ -2502,14 +2581,14 @@ function renderGame() {
   try { gameView.update(s); } catch (e) { console.error(e); body.innerHTML = `<div class="game-status">Could not draw the game (${esc(e.message)})</div>`; }
   let ov = body.querySelector('.g-result');
   if (over) {
-    const st = s.state, w = st.winner, won = w === my, draw = w === null || w === undefined || w < 0, sw = games.seriesWinner(s), seriesOver = sw >= 0;
+    const st = s.state, w = st.winner, won = w === my, draw = w === null || w === undefined || w < 0, sw = G_().seriesWinner(s), seriesOver = sw >= 0;
     if (!ov) { ov = document.createElement('div'); ov.className = 'g-result'; body.appendChild(ov); }
-    ov.innerHTML = `<div class="g-result-card ${draw ? 'draw' : won ? 'won' : 'lost'}"><div class="g-trophy">${draw ? '🤝' : won ? '🏆' : '😮'}</div><h3>${seriesOver ? (sw === my ? 'You win the match!' : esc(app.nameOf(s.players[sw])) + ' wins the match') : draw ? "It's a draw" : won ? 'You win!' : esc(app.nameOf(s.players[w])) + ' wins'}</h3>
-      ${st.score ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(p === app.pk ? 'You' : app.nameOf(p))} <b>${st.score[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : st.scores ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(p === app.pk ? 'You' : app.nameOf(p))} <b>${st.scores[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : ''}
-      ${!draw && (games.stats(s.chatId)[s.players[w]]?.streak || 0) >= 2 ? `<div class="g-streak">🔥 ${games.stats(s.chatId)[s.players[w]].streak} wins in a row</div>` : ''}
+    ov.innerHTML = `<div class="g-result-card ${draw ? 'draw' : won ? 'won' : 'lost'}"><div class="g-trophy">${draw ? '🤝' : won ? '🏆' : '😮'}</div><h3>${seriesOver ? (sw === my ? 'You win the match!' : esc(pname(s, s.players[sw])) + ' wins the match') : draw ? "It's a draw" : won ? 'You win!' : esc(pname(s, s.players[w])) + ' wins'}</h3>
+      ${st.score ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(pname(s, p))} <b>${st.score[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : st.scores ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(pname(s, p))} <b>${st.scores[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : ''}
+      ${!draw && (G_().stats(s.chatId)[s.players[w]]?.streak || 0) >= 2 ? `<div class="g-streak">🔥 ${G_().stats(s.chatId)[s.players[w]].streak} wins in a row</div>` : ''}
       <div class="g-result-actions"><button class="btn ghost" id="g-result-look">Look at board</button><button class="btn primary" data-game-act="again">${seriesOver ? 'New match' : 'Rematch'}</button></div>
       <button class="link" id="g-result-leave">Leave game</button></div>`;
-    ov.querySelector('[data-game-act=again]').onclick = () => { haptic(); if (seriesOver) { games.quit(s.id); try { openGame(games.invite(s.chatId, s.type).id); } catch (e) { toast(e.message, 'error'); } } else games.move(s.id, { a: 'again' }); };
+    ov.querySelector('[data-game-act=again]').onclick = () => { haptic(); if (seriesOver) { G_().quit(s.id); try { openGame(G_().invite(s.chatId, s.type).id); } catch (e) { toast(e.message, 'error'); } } else G_().move(s.id, { a: 'again' }); };
     ov.querySelector('#g-result-look').onclick = () => { ov.classList.add('peek'); setTimeout(() => ov && ov.classList.remove('peek'), 4000); };
     ov.querySelector('#g-result-leave').onclick = leaveGame;
     const doneKey = s.id + ':' + (st.round || 1);
