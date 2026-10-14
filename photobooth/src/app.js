@@ -129,8 +129,10 @@ function renderTheme() {
       c.width = Math.round(s.w * 0.28); c.height = Math.round(s.h * 0.28);
       card.append(c, el('div', { class: 'lname' }, t.name));
       card.onclick = () => {
-        if (state.project) state.project.themeId = t.id;
-        else state.selTheme = t.id;
+        if (state.project) {
+          state.project.themeId = t.id;
+          if (t.defaultTitle) state.project.text.title = t.defaultTitle;
+        }
         state.selTheme = t.id;
         grid.querySelectorAll('.theme-card').forEach(x => x.classList.remove('on'));
         card.classList.add('on');

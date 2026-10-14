@@ -79,7 +79,7 @@ main { flex: 1; position: relative; }
   display: none;
 }
 .screen.on { display: block; animation: pop .28s cubic-bezier(.34,1.56,.64,1); }
-@keyframes pop { from { opacity: 0; transform: translateY(14px) scale(.98); } }
+@keyframes pop { from { transform: translateY(14px) scale(.98); } }
 
 h2.screen-title { font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; font-size: 24px; margin: 6px 0 14px; }
 h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand'; font-weight: 600; }
@@ -236,7 +236,18 @@ h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand';
   font-size: 11px; font-weight: 700; color: var(--ink); padding: 6px 0; border-radius: 12px;
 }
 .toolbar button .ti { font-size: 20px; }
-.toolbar button:active, .toolbar button.on { background: #FFF0F5; }
+.toolbar button:active, .toolbar button.on { background: #FFF0F5; color: var(--pink); }
+
+/* Docked panel (Filter/Frame) — sits inline above the toolbar, opaque */
+.dock {
+  background: #fff; border-top: 2px solid #ffe3ee; flex-shrink: 0;
+  max-height: 44%; overflow-y: auto; padding: 10px 12px 12px;
+  animation: dockup .22s ease;
+}
+@keyframes dockup { from { transform: translateY(30%); } }
+.dock.hidden { display: none; }
+.dock h3 { font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; margin: 0 0 8px; font-size: 16px; display: inline-block; }
+.dock .dock-x { float: right; width: 30px; height: 30px; border-radius: 50%; border: none; background: #fff0f5; color: #a25474; font-weight: 700; cursor: pointer; }
 
 /* Sheets */
 #sheet-root .backdrop {

@@ -47,6 +47,26 @@ export function clampCell(cell, rect, m) {
   cell.oy = Math.max(-maxOy, Math.min(maxOy, cell.oy));
 }
 
+function sh(node) { closeDock(); openSheet(node); }
+
+let dockEl = null, dockTab = null;
+function openDock(node, tab) {
+  if (!dockEl) return;
+  if (dockTab === tab && !dockEl.classList.contains('hidden')) { closeDock(); return; }
+  closeSheet();
+  dockEl.innerHTML = '';
+  dockEl.append(el('button', { class: 'dock-x', onclick: () => closeDock(), 'aria-label': 'Close' }, '✕'), node);
+  dockEl.classList.remove('hidden');
+  dockTab = tab;
+  document.querySelectorAll('#scr-editor .toolbar button').forEach(b =>
+    b.classList.toggle('on', b.textContent.trim() === dockTab));
+}
+function closeDock() {
+  if (dockEl) dockEl.classList.add('hidden');
+  dockTab = null;
+  document.querySelectorAll('#scr-editor .toolbar button').forEach(b => b.classList.remove('on'));
+}
+
 export function renderEditor(root) {
   root.innerHTML = '';
   const wrap = el('div', { class: 'editor-wrap' });
@@ -55,12 +75,14 @@ export function renderEditor(root) {
   pctx = previewCanvas.getContext('2d');
   area.append(previewCanvas);
   wrap.append(area);
+  dockEl = el('div', { class: 'dock hidden' });
+  wrap.append(dockEl);
 
   const ICON = (p) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
   const TABS = [
     ['Layout', ICON('<rect x="3" y="5" width="8" height="14" rx="1.5"/><rect x="13" y="5" width="8" height="7" rx="1.5"/><rect x="13" y="14" width="8" height="5" rx="1.5"/>'), openLayoutSheet],
-    ['Frame', ICON('<rect x="3" y="4" width="18" height="16" rx="3"/><rect x="6.5" y="7.5" width="11" height="9" rx="1.5"/>'), openThemeSheet],
-    ['Filter', ICON('<circle cx="12" cy="12" r="8"/><path d="M12 4v16M4 12h16"/><circle cx="12" cy="12" r="3"/>'), openFilterSheet],
+    ['Frame', ICON('<rect x="3" y="4" width="18" height="16" rx="3"/><rect x="6.5" y="7.5" width="11" height="9" rx="1.5"/>'), () => openThemeSheet(true)],
+    ['Filter', ICON('<circle cx="12" cy="12" r="8"/><path d="M12 4v16M4 12h16"/><circle cx="12" cy="12" r="3"/>'), () => openFilterSheet(true)],
     ['Photos', ICON('<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9.5" cy="10" r="1.5"/><path d="M4 17l5-5 4 4 3-3 4 4"/>'), openPhotosSheet],
     ['Text', ICON('<path d="M6 5h12M12 5v14M9 19h6"/>'), openTextSheet],
     ['Stickers', ICON('<path d="M12 3l2.4 5 5.6.7-4.1 4 1 5.6-4.9-2.7-4.9 2.7 1-5.6-4.1-4 5.6-.7z"/>'), openStickerSheet],
@@ -204,7 +226,7 @@ function openLayoutSheet() {
     grid.append(card);
     renderMini(c, l);
   }
-  openSheet(el('div', {}, el('h3', {}, 'Layout 레이아웃'), grid));
+  sh(el('div', {}, el('h3', {}, 'Layout 레이아웃'), grid));
 }
 
 function renderMini(canvas, layout, project) {
@@ -219,7 +241,7 @@ function renderMini(canvas, layout, project) {
   proj.layoutId = old;
 }
 
-function openThemeSheet() {
+function openThemeSheet(docked) {
   const tabs = el('div', { class: 'tabs seg' });
   const grid = el('div', { class: 'theme-grid' });
   let cat = getTheme(state.project.themeId).category || 'plain';
@@ -232,7 +254,9 @@ function openThemeSheet() {
       if (t.decorate) t.decorate(c.getContext('2d'), 140, 140, [{ x: 30, y: 30, w: 80, h: 80 }]);
       sw.append(c, el('div', { class: 'tname' }, t.name));
       sw.onclick = () => {
-        state.project.themeId = t.id; needsDraw = true;
+        state.project.themeId = t.id;
+        if (t.defaultTitle) state.project.text.title = t.defaultTitle;
+        needsDraw = true;
         grid.querySelectorAll('.theme-swatch').forEach(x => x.classList.remove('on'));
         sw.classList.add('on');
       };
@@ -244,12 +268,13 @@ function openThemeSheet() {
       class: 'tab' + (ct.id === cat ? ' on' : ''),
       onclick: e => { cat = ct.id; tabs.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === e.currentTarget)); fill(); },
     }, ct.label));
-  openSheet(el('div', {}, el('h3', {}, 'Frame theme 프레임'), tabs, grid));
+  const node = el('div', {}, el('h3', {}, 'Frame theme 프레임'), tabs, grid);
+  if (docked) openDock(node, 'Frame'); else sh(node);
   fill();
 }
 
 const filterThumbCache = new Map();
-function openFilterSheet() {
+function openFilterSheet(docked) {
   // thumbnail source: first filled cell, else gradient
   const srcCell = (state.project.cells || []).find(c => c && c.media);
   const thumb = document.createElement('canvas'); thumb.width = thumb.height = 128;
@@ -289,10 +314,11 @@ function openFilterSheet() {
   build();
   const slider = el('input', { type: 'range', min: 0, max: 100, value: state.project.filter.intensity });
   slider.oninput = () => { state.project.filter.intensity = +slider.value; needsDraw = true; };
-  openSheet(el('div', {}, el('h3', {}, 'Filter 필터'),
+  const node = el('div', {}, el('h3', {}, 'Filter 필터'),
     el('div', { class: 'field' }, bLabel, beauty),
     row,
-    el('div', { class: 'field', style: 'margin-top:12px' }, el('label', {}, 'Intensity'), slider)));
+    el('div', { class: 'field', style: 'margin-top:12px' }, el('label', {}, 'Intensity'), slider));
+  if (docked) openDock(node, 'Filter'); else sh(node);
 }
 
 function cellThumbCanvas(i) {
@@ -353,7 +379,7 @@ function openPhotosSheet() {
         state.swapFirst = -1; needsDraw = true; closeSheet(); toast('Cleared 🧹');
       }
     }, '🧹 Clear all'));
-  openSheet(el('div', {}, el('h3', {}, 'Photos 사진'), grid, row, file));
+  sh(el('div', {}, el('h3', {}, 'Photos 사진'), grid, row, file));
 }
 
 async function fillCells(fileList) {
@@ -426,7 +452,7 @@ function openTextSheet() {
       return s;
     }));
   wrap.append(el('div', { class: 'field' }, el('label', {}, 'Text color'), swRow));
-  openSheet(wrap);
+  sh(wrap);
 }
 
 function openStickerSheet() {
@@ -455,7 +481,7 @@ function openStickerSheet() {
         state.project.stickers = []; needsDraw = true; closeSheet(); toast('Stickers cleared');
       }
     }, '✕ Clear stickers'));
-  openSheet(el('div', {}, el('h3', {}, 'Stickers 스티커'), grid,
+  sh(el('div', {}, el('h3', {}, 'Stickers 스티커'), grid,
     el('div', { class: 'hint' }, 'Tip: drag to move · pinch to resize/rotate · tap ✕ below to remove the last one.'), delRow));
 }
 
@@ -475,7 +501,7 @@ function openAdjust(i) {
       }
       cell.media = media; needsDraw = true; openAdjust(i);
     };
-    openSheet(el('div', {}, el('h3', {}, `Photo ${i + 1}`),
+    sh(el('div', {}, el('h3', {}, `Photo ${i + 1}`),
       el('button', { class: 'pill', onclick: () => file.click() }, '＋ Pick a photo or video'), file));
     return;
   }
@@ -554,7 +580,7 @@ function openAdjust(i) {
       }
     }, '✂️ Trim'));
   wrap.append(row, file);
-  openSheet(wrap);
+  sh(wrap);
 }
 openAdjustFn = openAdjust;
 export { openAdjust };
@@ -711,6 +737,6 @@ function openSaveSheet() {
   kids.push(saveBtn, shareBtn);
   if (liveBtn) kids.push(liveBtn);
   kids.push(prog);
-  openSheet(el('div', {}, ...kids));
+  sh(el('div', {}, ...kids));
 }
 export { openSaveSheet, deliver };
