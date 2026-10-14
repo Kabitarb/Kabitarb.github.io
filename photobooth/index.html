@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#FFF8F0">
+<title>달콤부스 Dalkom Booth</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <button id="btn-back" class="icon-btn hidden" aria-label="Back">←</button>
+    <h1 id="app-title">달콤부스</h1>
+    <button id="btn-save-top" class="pill small hidden">저장 Save</button>
+  </header>
+  <main id="screens">
+    <section class="screen" id="scr-home"></section>
+    <section class="screen" id="scr-layout"></section>
+    <section class="screen" id="scr-source"></section>
+    <section class="screen" id="scr-booth"></section>
+    <section class="screen" id="scr-pick"></section>
+    <section class="screen" id="scr-trim"></section>
+    <section class="screen" id="scr-editor"></section>
+    <section class="screen" id="scr-album"></section>
+  </main>
+  <div id="sheet-root"></div>
+  <div id="toast-root"></div>
+</div>
+<script type="module" src="src/app.js"></script>
+</body>
+</html>
