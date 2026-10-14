@@ -14,7 +14,7 @@ import { GameManager, GAMES, VIEWS, GAME_ORDER } from './games.js';
 import { ARCADE, ARCADE_ORDER, bestScore, recordScore } from './arcade.js';
 import { ENGINES } from './games/registry.js';
 import { randSeed } from './games/util.js';
-import { PIECES, PIECE_KEY, myPiece, LUDO_COLORS } from './games/ludo.js';
+import { PIECES, PIECE_KEY, myPiece, pieceSvg, LUDO_COLORS } from './games/ludo.js';
 import { ShareManager } from './share.js';
 import { WatchManager, parseMedia, MEDIA_RE } from './watch.js';
 import { TV_CHANNELS, TV_CATS, tvUrl, tvHue } from './tv.js';
@@ -2391,12 +2391,12 @@ function openLocalSetup(type) {
   const draw = () => {
     showModal(`<div class="lp"><div class="lobby-hero" style="--gc:${G.color}"><span>${G.icon}</span></div><h3>${esc(G.name)}</h3><p class="muted">Pass &amp; play — everyone on this phone</p>
       ${G.max > G.min ? `<div class="lp-count" role="radiogroup" aria-label="Players">${Array.from({ length: G.max - G.min + 1 }, (_, k) => G.min + k).map((k) => `<button class="chip ${k === n ? 'on' : ''}" data-n="${k}">${k} players</button>`).join('')}</div>` : `<p class="tiny muted">${G.max} players</p>`}
-      <div class="lp-players">${Array.from({ length: n }, (_, i) => `<div class="lp-row" style="--c:${LUDO_COLORS[i].fill}"><i></i><input data-i="${i}" maxlength="14" value="${esc(names[i])}" placeholder="Player ${i + 1}" aria-label="Player ${i + 1} name">${hasPieces ? `<button class="lp-piece" data-i="${i}" aria-label="Piece">${PIECES[pieces[i]].g || '●'}</button>` : ''}</div>`).join('')}</div>
+      <div class="lp-players">${Array.from({ length: n }, (_, i) => `<div class="lp-row" style="--c:${LUDO_COLORS[i].fill}"><i></i><input data-i="${i}" maxlength="14" value="${esc(names[i])}" placeholder="Player ${i + 1}" aria-label="Player ${i + 1} name">${hasPieces ? `<button class="lp-piece" data-i="${i}" aria-label="Piece: ${PIECES[pieces[i]].name}">${pieceIcon(pieces[i], LUDO_COLORS[i].fill)}</button>` : ''}</div>`).join('')}</div>
       <button class="btn primary" id="lp-start">Start</button></div>`);
     const mb = $('modal-body');
     mb.querySelectorAll('[data-n]').forEach((b) => { b.onclick = () => { readNames(); n = Number(b.dataset.n); haptic(); draw(); }; });
     const readNames = () => mb.querySelectorAll('input[data-i]').forEach((inp) => { names[Number(inp.dataset.i)] = inp.value; });
-    mb.querySelectorAll('.lp-piece').forEach((b) => { b.onclick = () => { const i = Number(b.dataset.i); const keys = Object.keys(PIECES); pieces[i] = keys[(keys.indexOf(pieces[i]) + 1) % keys.length]; b.textContent = PIECES[pieces[i]].g || '●'; haptic(6); }; });
+    mb.querySelectorAll('.lp-piece').forEach((b) => { b.onclick = () => { const i = Number(b.dataset.i); const keys = Object.keys(PIECES); pieces[i] = keys[(keys.indexOf(pieces[i]) + 1) % keys.length]; b.innerHTML = pieceIcon(pieces[i], LUDO_COLORS[i].fill); b.setAttribute('aria-label', 'Piece: ' + PIECES[pieces[i]].name); haptic(6); }; });
     $('lp-start').onclick = () => {
       readNames(); hideModal(); haptic(12);
       localStorage.setItem(LOCAL_SETUP_KEY, JSON.stringify({ n, names, pieces }));
@@ -2417,7 +2417,8 @@ function renderPlay() {
   host.querySelectorAll('[data-la]').forEach((b) => { b.onclick = () => { haptic(); openArcade(b.dataset.la, null); }; });
   wirePieceRow(host, renderPlay);
 }
-function pieceRowHtml() { const cur = myPiece(); return `<div class="piece-row" role="radiogroup" aria-label="Your piece">${Object.entries(PIECES).map(([k, v]) => `<button class="${k === cur ? 'on' : ''}" data-piece="${k}" title="${v.name}" aria-label="${v.name}"><span>${v.g || '●'}</span></button>`).join('')}</div>`; }
+function pieceRowHtml() { const cur = myPiece(); return `<div class="piece-row" role="radiogroup" aria-label="Your piece">${Object.entries(PIECES).map(([k, v]) => `<button class="${k === cur ? 'on' : ''}" data-piece="${k}" title="${v.name}" aria-label="${v.name}">${pieceIcon(k, '#3b82f6')}</button>`).join('')}</div>`; }
+const pieceIcon = (k, color, sz = 26) => `<svg viewBox="-12.5 -12.5 25 25" width="${sz}" height="${sz}" aria-hidden="true">${pieceSvg(k, color, 24)}</svg>`;
 function wirePieceRow(root, after) { root.querySelectorAll('[data-piece]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); localStorage.setItem(PIECE_KEY, b.dataset.piece); haptic(8); root.querySelectorAll('[data-piece]').forEach((x) => x.classList.toggle('on', x === b)); if (after) after(); }; }); }
 function tickGameTimer() {
   const s = G_().get(openGameId); const t = document.getElementById('g-timer'); if (!s || !t) return;
