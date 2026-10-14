@@ -1,5 +1,5 @@
 // Dalkom Booth — SPA router + home + layout picker + source + pick + album.
-import { state, el, toast, newProject, emptyCell, closeSheet } from './state.js';
+import { state, el, toast, newProject, emptyCell, closeSheet, clearToasts } from './state.js';
 import { LAYOUTS, SIZES, getLayout, layoutSize } from './layouts.js';
 import { getTheme } from './themes.js';
 import { render } from './render.js';
@@ -17,13 +17,14 @@ let boothCtl = null, navStack = [];
 function go(screen, push = true) {
   if (boothCtl && screen !== 'booth') { boothCtl.stopCam && boothCtl.stopCam(); boothCtl = null; }
   closeSheet();
+  clearToasts();
   const transient = ['trim', 'pick', 'booth'];
   if (push && state.screen !== screen && !transient.includes(state.screen) && !transient.includes(screen)) navStack.push(state.screen);
   state.screen = screen;
   for (const s of SCREENS) $('scr-' + s).classList.toggle('on', s === screen);
   $('btn-back').classList.toggle('hidden', screen === 'home');
   $('btn-save-top').classList.toggle('hidden', screen !== 'editor');
-  $('app-title').textContent = screen === 'home' ? '달콤부스' : '달콤부스 Dalkom Booth';
+  $('app-title').textContent = screen === 'home' ? '달콤부스' : (screen === 'editor' ? '편집 Edit' : '달콤부스');
   renderScreen(screen);
 }
 function goBack() { go(navStack.pop() || 'home', false); }
@@ -117,7 +118,7 @@ function renderLayoutPicker() {
       };
       grid.append(card);
       const proj = {
-        ...state.project, layoutId: l.id, themeId: 'white',
+        ...state.project, layoutId: l.id,
         text: { ...state.project.text, show: true }, cells: [], stickers: [],
         getMediaSource: () => null,
       };
@@ -158,6 +159,8 @@ function renderSource() {
         for (const it of items) {
           const bin = atob(it.b64); const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
           const blob = new Blob([bytes], { type: it.mime });
+          blob.name = it.name && it.name.includes('.') ? it.name
+            : (it.name || 'live') + ({ 'video/quicktime': '.mov', 'video/mp4': '.mp4' }[it.mime] || '.mp4');
           const media = await fileToMedia(blob);
           state.trimQueue = state.trimQueue || [];
           state.trimQueue.push(media);

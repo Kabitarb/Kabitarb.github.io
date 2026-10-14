@@ -14,7 +14,7 @@
       "localizedDescription": "Cute Korean photo booth — snap, frame, save.",
       "iconURL": "https://kabitarb.github.io/photobooth/icons/icon-512.png",
       "tintColor": "FF8FB1",
-      "size": 1000000,
+      "size": 140535,
       "minOSVersion": "16.0",
       "permissions": [
         { "type": "photos", "usageDescription": "Save your photo strips to Photos." },

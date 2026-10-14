@@ -1,4 +1,4 @@
-const CACHE = 'booth-v1';
+const CACHE = 'booth-v2';
 const CORE = [
   'index.html', 'styles.css', 'manifest.webmanifest',
   'fonts/fonts.css',

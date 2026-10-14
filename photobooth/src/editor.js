@@ -59,7 +59,6 @@ export function renderEditor(root) {
     ['Layout', '🖼️', openLayoutSheet], ['Frame', '🎀', openThemeSheet],
     ['Filter', '✨', openFilterSheet], ['Photos', '📷', openPhotosSheet],
     ['Text', '✏️', openTextSheet], ['Stickers', '💖', openStickerSheet],
-    ['Save', '💾', openSaveSheet],
   ];
   const bar = el('div', { class: 'toolbar' },
     TABS.map(([label, icon, fn]) =>
@@ -196,7 +195,7 @@ function openLayoutSheet() {
     const c = el('canvas'); const s = layoutSize(l);
     c.width = Math.round(s.w * 0.16); c.height = Math.round(s.h * 0.16);
     card.append(c, el('div', { class: 'lname' }, `${l.id} · ${l.name}`), el('div', { class: 'lmeta' }, `${l.cells.length} cuts`));
-    card.onclick = () => { switchLayout(l.id); closeSheet(); toast(`Layout ${l.id} ✨`); };
+    card.onclick = () => { switchLayout(l.id); closeSheet(); };
     grid.append(card);
     renderMini(c, l);
   }
@@ -225,7 +224,7 @@ function openThemeSheet() {
     sw.onclick = () => {
       state.project.themeId = t.id; needsDraw = true;
       grid.querySelectorAll('.theme-swatch').forEach(x => x.classList.remove('on'));
-      sw.classList.add('on'); toast(t.name + ' 🎀');
+      sw.classList.add('on');
     };
     grid.append(sw);
   }

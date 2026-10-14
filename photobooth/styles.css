@@ -18,7 +18,7 @@ body {
   background-image: radial-gradient(rgba(255, 143, 177, .10) 1.5px, transparent 1.5px);
   background-size: 22px 22px;
   color: var(--ink);
-  font-family: 'Quicksand', 'Jua', sans-serif;
+  font-family: 'Quicksand', 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
   overscroll-behavior: none;
 }
 button { font-family: inherit; color: inherit; }
@@ -39,7 +39,7 @@ button { font-family: inherit; color: inherit; }
   display: flex; align-items: center; gap: 10px;
   padding: 10px 16px;
 }
-#app-title { font-family: 'Jua', sans-serif; font-size: 26px; margin: 0; flex: 1; color: var(--pink-dark); }
+#app-title { font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; font-size: 22px; margin: 0; flex: 1; color: var(--pink-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 #topbar.shrunk #app-title { font-size: 20px; }
 
 .pill {
@@ -48,7 +48,8 @@ button { font-family: inherit; color: inherit; }
   padding: 12px 22px; font-size: 17px; font-weight: 700;
   box-shadow: var(--shadow); cursor: pointer;
   transition: transform .12s cubic-bezier(.34,1.56,.64,1);
-  font-family: 'Jua', 'Quicksand', sans-serif;
+  font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", 'Quicksand', sans-serif;
+  white-space: nowrap;
 }
 .pill:active { transform: scale(.93); }
 .pill.small { padding: 7px 14px; font-size: 14px; }
@@ -73,7 +74,7 @@ main { flex: 1; position: relative; }
 .screen.on { display: block; animation: pop .28s cubic-bezier(.34,1.56,.64,1); }
 @keyframes pop { from { opacity: 0; transform: translateY(14px) scale(.98); } }
 
-h2.screen-title { font-family: 'Jua', sans-serif; font-size: 24px; margin: 6px 0 14px; }
+h2.screen-title { font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; font-size: 24px; margin: 6px 0 14px; }
 h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand'; font-weight: 600; }
 
 /* Home */
@@ -99,7 +100,7 @@ h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand';
 }
 .layout-card:active { transform: scale(.95); }
 .layout-card canvas { width: 100%; border-radius: 12px; display: block; }
-.layout-card .lname { font-family: 'Jua'; margin-top: 8px; font-size: 15px; }
+.layout-card .lname { font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; margin-top: 8px; font-size: 15px; }
 .layout-card .lmeta { font-size: 12px; color: #b09aa5; font-weight: 600; }
 
 /* Source */
@@ -112,7 +113,7 @@ h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand';
 #booth-video.nomirror { transform: none; }
 #booth-count {
   position: absolute; inset: 0; display: none; align-items: center; justify-content: center;
-  font-family: 'Jua'; font-size: 120px; color: #fff;
+  font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; font-size: 110px; color: #fff;
   text-shadow: 0 6px 0 rgba(0,0,0,.2); z-index: 3;
 }
 #booth-count.on { display: flex; animation: countpop .9s cubic-bezier(.34,1.56,.64,1); }
@@ -124,7 +125,7 @@ h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand';
 }
 .booth-controls { display: flex; gap: 10px; margin-top: 14px; flex-wrap: wrap; justify-content: center; }
 .booth-row { display: flex; gap: 8px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
-.booth-row label { font-weight: 700; font-family: 'Jua'; }
+.booth-row label { font-weight: 700; font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
 
 /* Pick */
 .pick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
@@ -134,7 +135,7 @@ h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand';
 .pick-item .badge {
   position: absolute; top: 6px; right: 6px; background: var(--pink); color: #fff;
   border-radius: 50%; width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
-  font-family: 'Jua'; font-size: 14px;
+  font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; font-size: 14px;
 }
 .pick-item .cellbadge { left: 6px; right: auto; background: var(--blue); }
 
@@ -146,7 +147,19 @@ h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand';
 .trim-range-wrap input[type=range] { position: absolute; width: 100%; pointer-events: none; appearance: none; background: none; }
 .trim-range-wrap input[type=range]::-webkit-slider-thumb { pointer-events: auto; appearance: none; width: 26px; height: 26px; border-radius: 50%; background: var(--pink); border: 3px solid #fff; box-shadow: 0 2px 4px rgba(0,0,0,.2); cursor: pointer; }
 .trim-range-wrap input[type=range]::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: #eee; }
-.trim-info { text-align: center; font-family: 'Jua'; font-size: 16px; }
+.trim-info { text-align: center; font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; font-size: 15px; }
+.trim-window {
+  position: absolute; top: 0; bottom: 0; border: 3px solid var(--pink); border-radius: 10px;
+  background: rgba(255, 143, 177, .12); touch-action: none; cursor: grab; box-sizing: border-box;
+}
+.trim-window .th {
+  position: absolute; top: 50%; width: 18px; height: 34px; transform: translateY(-50%);
+  background: var(--pink); border: 2px solid #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.25);
+}
+.trim-window .th.l { left: -6px; } .trim-window .th.r { right: -6px; }
+.trim-dim { position: absolute; top: 0; bottom: 0; background: rgba(90, 74, 82, .45); pointer-events: none; }
+.trim-times { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: #b09aa5; margin-top: 4px; }
+#trim-video { max-height: 34vh; object-fit: contain; margin: 0 auto; }
 
 /* Editor */
 #scr-editor { padding-bottom: 0; }
@@ -154,26 +167,26 @@ h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand';
 .preview-area { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; padding: 4px; }
 #preview-canvas { max-width: 100%; max-height: 100%; border-radius: 8px; box-shadow: 0 8px 24px rgba(90,74,82,.18); touch-action: none; }
 .toolbar {
-  background: #fff; border-top: 2px solid #ffe3ee; padding: 8px 6px calc(8px + env(safe-area-inset-bottom));
-  display: flex; gap: 4px; overflow-x: auto; flex-shrink: 0;
+  background: #fff; border-top: 2px solid #ffe3ee; padding: 8px 4px calc(8px + env(safe-area-inset-bottom));
+  display: flex; gap: 0; flex-shrink: 0;
 }
 .toolbar button {
-  flex: 1; min-width: 62px; border: none; background: none; cursor: pointer;
+  flex: 1; min-width: 0; border: none; background: none; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; gap: 3px;
-  font-size: 11px; font-weight: 700; color: var(--ink); padding: 6px 2px; border-radius: 12px;
+  font-size: 11px; font-weight: 700; color: var(--ink); padding: 6px 0; border-radius: 12px;
 }
 .toolbar button .ti { font-size: 20px; }
 .toolbar button:active, .toolbar button.on { background: #FFF0F5; }
 
 /* Sheets */
 #sheet-root .backdrop {
-  position: fixed; inset: 0; background: rgba(90,74,82,.35); z-index: 40;
+  position: fixed; inset: 0; background: rgba(90,74,82,.35); z-index: 99;
   animation: fade .2s;
 }
 @keyframes fade { from { opacity: 0 } }
 .sheet {
   position: fixed; left: 50%; transform: translateX(-50%);
-  bottom: 0; width: 100%; max-width: 480px; z-index: 41;
+  bottom: 0; width: 100%; max-width: 480px; z-index: 100;
   background: #fff; border-radius: 26px 26px 0 0; padding: 14px 16px calc(18px + env(safe-area-inset-bottom));
   box-shadow: 0 -8px 30px rgba(0,0,0,.15);
   max-height: 82vh; overflow-y: auto;
@@ -181,7 +194,11 @@ h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand';
 }
 @media (min-width: 900px) { .sheet { max-width: 640px; } }
 @keyframes sheetup { from { transform: translate(-50%, 60%); opacity: 0; } }
-.sheet h3 { font-family: 'Jua'; margin: 2px 0 12px; font-size: 20px; }
+.sheet h3 { font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; margin: 2px 0 12px; font-size: 20px; }
+.sheet .sheet-x {
+  position: absolute; top: 10px; right: 14px; width: 32px; height: 32px; border-radius: 50%;
+  border: none; background: #fff0f5; color: #a25474; font-size: 16px; font-weight: 700; cursor: pointer;
+}
 .sheet .grab { width: 44px; height: 5px; border-radius: 3px; background: #eee; margin: 0 auto 10px; }
 
 .opt-grid { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -199,11 +216,11 @@ h2.screen-title .en { font-size: 15px; color: #b09aa5; font-family: 'Quicksand';
 .cell-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 10px; margin-bottom: 12px; }
 .cell-thumb { border-radius: 14px; overflow: hidden; border: 3px solid transparent; cursor: pointer; background: #f6f0f2; position: relative; }
 .cell-thumb canvas, .cell-thumb video, .cell-thumb img { width: 100%; aspect-ratio: 3/4; object-fit: cover; display: block; }
-.cell-thumb .cnum { position: absolute; top: 4px; left: 6px; font-family: 'Jua'; font-size: 13px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.cell-thumb .cnum { position: absolute; top: 4px; left: 6px; font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; font-size: 13px; color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.4); }
 .cell-thumb.swappick { border-color: var(--blue); }
 
 .field { margin-bottom: 12px; }
-.field label { display: block; font-weight: 700; font-size: 13px; margin-bottom: 5px; font-family: 'Jua'; }
+.field label { display: block; font-weight: 700; font-size: 13px; margin-bottom: 5px; font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
 .field input[type=text], .field input[type=date] {
   width: 100%; border: 2px solid #f0e4ea; border-radius: 14px; padding: 10px 12px;
   font-family: inherit; font-size: 16px;
@@ -238,7 +255,7 @@ input[type=range] { accent-color: var(--pink); width: 100%; }
 #toast-root { position: fixed; bottom: 90px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; z-index: 60; pointer-events: none; }
 .toast {
   background: #5a4a52; color: #fff; padding: 10px 20px; border-radius: 999px;
-  font-family: 'Jua'; font-size: 15px; box-shadow: 0 4px 14px rgba(0,0,0,.25);
+  font-family: 'Jua', "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; font-size: 15px; box-shadow: 0 4px 14px rgba(0,0,0,.25);
   animation: toastin .3s cubic-bezier(.34,1.56,.64,1);
 }
 @keyframes toastin { from { transform: translateY(20px); opacity: 0; } }

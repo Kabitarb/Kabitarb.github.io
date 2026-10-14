@@ -16,10 +16,10 @@ export const state = {
 export function newProject(layoutId) {
   const p = attachRuntime({
     layoutId,
-    themeId: 'white',
+    themeId: 'strawberry',
     filter: { id: 'original', intensity: 100 },
     text: {
-      title: 'Groom & Thibodeau', subtitle: 'Our Special Day',
+      title: 'our cute day ♡', subtitle: 'Our Special Day',
       date: new Date().toISOString(), dateFormat: 'ymd',
       font: null, color: 'auto', show: true, showDate: true,
     },
@@ -48,18 +48,26 @@ export function el(tag, attrs = {}, ...kids) {
   return e;
 }
 
+let curToast = null;
 export function toast(msg) {
+  clearToasts();
   const root = document.getElementById('toast-root');
   const t = el('div', { class: 'toast' }, msg);
   root.append(t);
-  setTimeout(() => { t.style.opacity = 0; t.style.transition = 'opacity .3s'; setTimeout(() => t.remove(), 320); }, 2200);
+  curToast = t;
+  setTimeout(() => { if (curToast === t) { t.style.opacity = 0; t.style.transition = 'opacity .3s'; setTimeout(() => { t.remove(); if (curToast === t) curToast = null; }, 320); } }, 1600);
+}
+export function clearToasts() {
+  if (curToast) { curToast.remove(); curToast = null; }
+  document.querySelectorAll('#toast-root .toast').forEach(t => t.remove());
 }
 
 let sheetEl = null, backdropEl = null;
 export function openSheet(node, { onClose } = {}) {
   closeSheet();
   backdropEl = el('div', { class: 'backdrop', onclick: () => { closeSheet(); } });
-  sheetEl = el('div', { class: 'sheet' }, el('div', { class: 'grab' }), node);
+  sheetEl = el('div', { class: 'sheet' }, el('div', { class: 'grab' }),
+    el('button', { class: 'sheet-x', onclick: () => closeSheet(), 'aria-label': 'Close' }, '✕'), node);
   // drag-to-dismiss on the grabber
   let sy = 0;
   sheetEl.addEventListener('touchstart', e => { if (e.target.closest('.grab')) sy = e.touches[0].clientY; }, { passive: true });

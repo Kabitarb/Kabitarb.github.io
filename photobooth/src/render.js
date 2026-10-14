@@ -55,17 +55,33 @@ function drawCellMedia(ctx, cell, rect, project, scale, time, filterEng) {
     if (src) s.drawImage(src, -iw / 2, -ih / 2);
     s.restore();
   } else {
-    // placeholder cell
-    s.fillStyle = 'rgba(0,0,0,.05)';
+    // cute placeholder cell: pastel fill + drawn camera glyph
+    s.fillStyle = '#FFF0F5';
     s.fillRect(0, 0, px, py);
-    s.strokeStyle = 'rgba(0,0,0,.15)'; s.lineWidth = Math.max(2, 3 * scale);
-    s.setLineDash([14 * scale, 12 * scale]);
-    s.strokeRect(10 * scale, 10 * scale, px - 20 * scale, py - 20 * scale);
-    s.setLineDash([]);
-    s.fillStyle = 'rgba(0,0,0,.28)';
-    s.font = `${Math.round(py * 0.22)}px Jua, sans-serif`;
-    s.textAlign = 'center'; s.textBaseline = 'middle';
-    s.fillText(String((project.cells.indexOf(cell) % 9) + 1), px / 2, py / 2);
+    const g = s.createLinearGradient(0, 0, px, py);
+    g.addColorStop(0, 'rgba(255,143,177,.10)'); g.addColorStop(1, 'rgba(168,216,255,.12)');
+    s.fillStyle = g; s.fillRect(0, 0, px, py);
+    const gs = Math.min(px, py) * 0.42;
+    s.save(); s.translate(px / 2, py / 2);
+    s.fillStyle = 'rgba(240,110,150,.55)';
+    // camera body
+    const bw = gs, bh = gs * 0.68;
+    s.beginPath(); s.roundRect ? s.roundRect(-bw / 2, -bh / 2 + gs * 0.08, bw, bh, gs * 0.16) : s.rect(-bw / 2, -bh / 2, bw, bh); s.fill();
+    // top bump
+    s.beginPath(); s.roundRect ? s.roundRect(-bw * 0.22, -bh / 2 - gs * 0.10, bw * 0.44, gs * 0.2, gs * 0.06) : s.rect(-bw * 0.22, -bh / 2 - gs * 0.1, bw * 0.44, gs * 0.2); s.fill();
+    // lens
+    s.fillStyle = '#fff';
+    s.beginPath(); s.arc(0, gs * 0.08, gs * 0.2, 0, 7); s.fill();
+    s.fillStyle = 'rgba(168,216,255,.9)';
+    s.beginPath(); s.arc(0, gs * 0.08, gs * 0.11, 0, 7); s.fill();
+    // sparkle
+    s.fillStyle = 'rgba(255,232,154,.95)';
+    s.beginPath();
+    const sp = gs * 0.14, sx = bw * 0.34, sy = -bh * 0.3;
+    s.moveTo(sx, sy - sp); s.quadraticCurveTo(sx, sy, sx + sp, sy);
+    s.quadraticCurveTo(sx, sy, sx, sy + sp); s.quadraticCurveTo(sx, sy, sx - sp, sy);
+    s.quadraticCurveTo(sx, sy, sx, sy - sp); s.fill();
+    s.restore();
   }
   const filtered = m && filterEng
     ? filterEng(scratch, scratch.width, scratch.height)
@@ -82,11 +98,11 @@ function roundRectPath(ctx, x, y, w, h, r) {
 function fitFont(ctx, text, family, weight, baseSize, maxW) {
   let size = baseSize;
   while (size > 10) {
-    ctx.font = `${weight || ''} ${size}px "${family}", sans-serif`.trim().replace('  ', ' ');
+    ctx.font = `${weight} ${size}px "${family}", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`.trim();
     if (ctx.measureText(text).width <= maxW) return size;
     size *= 0.92;
   }
-  ctx.font = `10px "${family}", sans-serif`;
+  ctx.font = `10px "${family}", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
   return 10;
 }
 
@@ -94,7 +110,7 @@ function wrapText(ctx, text, family, weight, baseSize, maxW) {
   // returns {lines:[], size}
   let size = baseSize;
   while (size > 10) {
-    ctx.font = `${weight} ${size}px "${family}", sans-serif`;
+    ctx.font = `${weight} ${size}px "${family}", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
     const words = text.split(/\s+/);
     const lines = []; let cur = '';
     for (const w of words) {
@@ -125,10 +141,10 @@ function drawTextBlock(ctx, block, project, theme) {
     // one line: title left-ish + date, centered as a row
     const h = block.h;
     const titleSize = h * 0.52, dateSize = h * 0.34;
-    ctx.font = `${titleSize}px "${font}", cursive`;
+    ctx.font = `${titleSize}px "${font}", "Apple SD Gothic Neo", "Noto Sans KR", cursive`;
     const title = t.title || 'dalkom booth';
     const tw = ctx.measureText(title).width;
-    ctx.font = `500 ${dateSize}px Quicksand, sans-serif`;
+    ctx.font = `500 ${dateSize}px Quicksand, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
     const dw = ctx.measureText(dateStr).width;
     const gap = Math.min(40, block.h * 0.35);
     const total = tw + gap + dw;
@@ -136,10 +152,10 @@ function drawTextBlock(ctx, block, project, theme) {
     const mid = block.y + block.h / 2;
     ctx.textAlign = 'left';
     ctx.fillStyle = color;
-    ctx.font = `${titleSize}px "${font}", cursive`;
+    ctx.font = `${titleSize}px "${font}", "Apple SD Gothic Neo", "Noto Sans KR", cursive`;
     ctx.fillText(title, x, mid + titleSize * 0.08);
     x += tw + gap;
-    ctx.font = `500 ${dateSize}px Quicksand, sans-serif`;
+    ctx.font = `500 ${dateSize}px Quicksand, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
     ctx.fillStyle = subColor;
     ctx.fillText(dateStr, x, mid + dateSize * 0.2);
     ctx.restore();
@@ -168,7 +184,7 @@ function drawTextBlock(ctx, block, project, theme) {
     const lh = it.size * 1.35;
     y += lh / 2;
     ctx.fillStyle = it.color;
-    ctx.font = `600 ${it.size}px "${it.family}", ${it.family === 'Quicksand' ? 'sans-serif' : 'cursive'}`;
+    ctx.font = `600 ${it.size}px "${it.family}", "Apple SD Gothic Neo", "Noto Sans KR", ${it.family === 'Quicksand' ? 'sans-serif' : 'cursive'}`;
     if (it.spacing && ctx.letterSpacing !== undefined) ctx.letterSpacing = it.spacing + 'px';
     ctx.fillText(it.text, cx, y);
     if (ctx.letterSpacing !== undefined) ctx.letterSpacing = '0px';
