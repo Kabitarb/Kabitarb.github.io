@@ -1,6 +1,6 @@
 // Snakes & Ladders — 2–4 players, exact roll to finish, 6 rolls again.
 import { esc } from './util.js';
-import { LUDO_COLORS, pieceGlyph } from './ludo.js';
+import { LUDO_COLORS, pieceSvg } from './ludo.js';
 
 export const meta = { name: 'Snakes & Ladders', icon: '🐍', min: 2, max: 4, color: '#f97316', blurb: 'Roll, climb ladders, dodge snakes. First to 100. 2–4 players.', series: 1, isNew: true };
 export const JUMPS = { 4: 14, 9: 31, 17: 7, 20: 38, 28: 84, 40: 59, 51: 67, 54: 34, 62: 19, 63: 81, 64: 60, 71: 91, 87: 24, 93: 73, 95: 75, 99: 78 };
@@ -26,31 +26,53 @@ export function cellXY(n) {
   const i = n - 1, row = Math.floor(i / 10), col = row % 2 ? 9 - (i % 10) : i % 10;
   return [(col + 0.5) * C, (9 - row + 0.5) * C];
 }
+function qpts(x1, y1, cx, cy, x2, y2, n) { const out = []; for (let i = 0; i <= n; i++) { const t = i / n, u = 1 - t; out.push([u * u * x1 + 2 * u * t * cx + t * t * x2, u * u * y1 + 2 * u * t * cy + t * t * y2]); } return out; }
+// Snake body: an S-curve from head (cell a) to tail (cell b), sampled so it can taper.
+function snakePts(x1, y1, x2, y2) {
+  const mx = (x1 + x2) / 2, my = (y1 + y2) / 2, dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy), nx = -dy / L, ny = dx / L, w = Math.min(60, L * 0.35);
+  const c1 = [mx + nx * w, my + ny * w], c2 = [2 * mx - c1[0], 2 * my - c1[1]];
+  return qpts(x1, y1, c1[0], c1[1], mx, my, 14).concat(qpts(mx, my, c2[0], c2[1], x2, y2, 14).slice(1));
+}
+function snakeSvg(pts, hue, id) {
+  const n = pts.length - 1; let g = `<g class="snake">`;
+  const seg = (i, w, col, extra = '') => `<line x1="${pts[i][0].toFixed(1)}" y1="${pts[i][1].toFixed(1)}" x2="${pts[i + 1][0].toFixed(1)}" y2="${pts[i + 1][1].toFixed(1)}" stroke="${col}" stroke-width="${w.toFixed(1)}" stroke-linecap="round" ${extra}/>`;
+  const width = (i) => 3 + 10 * Math.pow(1 - i / n, 0.8) * (i < 3 ? 0.9 : 1);
+  for (let i = 0; i < n; i++) g += seg(i, width(i) + 2.2, `hsl(${hue} 55% 22%)`, 'opacity=".9"');
+  for (let i = 0; i < n; i++) g += seg(i, width(i), `url(#sk${id})`);
+  for (let i = 0; i < n; i++) if (width(i) > 5) g += seg(i, Math.max(1, width(i) * 0.32), `hsl(${hue} 70% 78%)`, 'opacity=".55"');
+  for (let i = 1; i < n; i += 2) if (width(i) > 5) { const [x, y] = pts[i]; g += `<ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="${(width(i) * 0.22).toFixed(1)}" ry="${(width(i) * 0.14).toFixed(1)}" fill="hsl(${hue} 60% 18%)" opacity=".6"/>`; }
+  const [hx, hy] = pts[0], [bx, by] = pts[2], ang = Math.atan2(hy - by, hx - bx) * 180 / Math.PI;
+  g += `<g transform="translate(${hx.toFixed(1)} ${hy.toFixed(1)}) rotate(${ang.toFixed(1)})"><ellipse cx="2" cy="0" rx="9.5" ry="7" fill="url(#sk${id})" stroke="hsl(${hue} 55% 22%)" stroke-width="1.6"/><ellipse cx="4" cy="-1.5" rx="4" ry="2" fill="hsl(${hue} 70% 80%)" opacity=".4"/><circle cx="4.5" cy="-3.6" r="2" fill="#fff"/><circle cx="4.5" cy="3.6" r="2" fill="#fff"/><circle cx="5.2" cy="-3.6" r="1" fill="#111"/><circle cx="5.2" cy="3.6" r="1" fill="#111"/><path d="M11 0 L17 0 M17 0 L20 -2.5 M17 0 L20 2.5" stroke="#e11d48" stroke-width="1.4" stroke-linecap="round" fill="none"/></g></g>`;
+  return g;
+}
+function ladderSvg(x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy), nx = -dy / L * 7.5, ny = dx / L * 7.5, rungs = Math.max(2, Math.round(L / 20));
+  let g = `<g class="ladder" stroke-linecap="round">`;
+  for (const sgn of [1, -1]) g += `<line x1="${x1 + nx * sgn}" y1="${y1 + ny * sgn}" x2="${x2 + nx * sgn}" y2="${y2 + ny * sgn}" stroke="#4a2409" stroke-width="5.6"/><line x1="${x1 + nx * sgn}" y1="${y1 + ny * sgn}" x2="${x2 + nx * sgn}" y2="${y2 + ny * sgn}" stroke="url(#wood)" stroke-width="4"/>`;
+  for (let k = 1; k < rungs; k++) { const t = k / rungs, rx = x1 + dx * t, ry = y1 + dy * t; g += `<line x1="${rx + nx}" y1="${ry + ny}" x2="${rx - nx}" y2="${ry - ny}" stroke="#4a2409" stroke-width="4"/><line x1="${rx + nx}" y1="${ry + ny}" x2="${rx - nx}" y2="${ry - ny}" stroke="url(#wood)" stroke-width="2.6"/>`; }
+  return g + '</g>';
+}
 function boardSvg(st, myIdx, pieces, names) {
   let svg = `<svg viewBox="${-C * 0.95} ${-C * 0.3} ${S + C * 1.55} ${S + C * 0.9}" class="snl">`;
-  svg += `<rect x="-4" y="-4" width="${S + 8}" height="${S + 8}" rx="10" fill="#7c3f12"/>`;
-  for (let n = 1; n <= 100; n++) { const [x, y] = cellXY(n); const dark = (Math.floor((n - 1) / 10) + n) % 2; svg += `<rect x="${x - C / 2}" y="${y - C / 2}" width="${C}" height="${C}" fill="${dark ? '#fef3c7' : '#fde68a'}"/><text x="${x - C / 2 + 4}" y="${y - C / 2 + 12}" font-size="10" fill="#92400e">${n}</text>`; }
+  svg += `<defs><linearGradient id="wood" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d9a066"/><stop offset=".5" stop-color="#a86a35"/><stop offset="1" stop-color="#7a4418"/></linearGradient><linearGradient id="frame" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8a4a1c"/><stop offset=".5" stop-color="#5c2e0e"/><stop offset="1" stop-color="#3f1e08"/></linearGradient><radialGradient id="felt" cx=".5" cy=".4" r=".8"><stop offset="0" stop-color="#fff7dc"/><stop offset="1" stop-color="#f3dfa3"/></radialGradient>`;
+  for (const [a, b] of Object.entries(JUMPS)) if (b < Number(a)) { const hue = (Number(a) * 37) % 360; svg += `<linearGradient id="sk${a}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="hsl(${hue} 65% 58%)"/><stop offset=".5" stop-color="hsl(${hue} 70% 42%)"/><stop offset="1" stop-color="hsl(${hue} 60% 28%)"/></linearGradient>`; }
+  svg += `</defs>`;
+  svg += `<rect x="-9" y="-9" width="${S + 18}" height="${S + 18}" rx="14" fill="url(#frame)"/><rect x="-6" y="-6" width="${S + 12}" height="${S + 12}" rx="11" fill="none" stroke="rgba(255,220,160,.35)" stroke-width="1.2"/><rect x="0" y="0" width="${S}" height="${S}" fill="url(#felt)"/>`;
+  for (let n = 1; n <= 100; n++) { const [x, y] = cellXY(n); const dark = (Math.floor((n - 1) / 10) + n) % 2; svg += `<rect x="${x - C / 2}" y="${y - C / 2}" width="${C}" height="${C}" fill="${dark ? 'rgba(180,120,50,.16)' : 'rgba(255,255,255,.18)'}" stroke="rgba(120,70,20,.18)" stroke-width=".6"/><text x="${x - C / 2 + 3.5}" y="${y - C / 2 + 11}" font-size="9" font-weight="600" fill="#7c4a12" opacity=".85">${n}</text>`; }
   for (const [a, b] of Object.entries(JUMPS)) {
     const [x1, y1] = cellXY(Number(a)), [x2, y2] = cellXY(b);
-    if (b > Number(a)) {
-      const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy), nx = -dy / L * 7, ny = dx / L * 7;
-      svg += `<g class="ladder" stroke="#b45309" stroke-width="3.5" stroke-linecap="round"><line x1="${x1 + nx}" y1="${y1 + ny}" x2="${x2 + nx}" y2="${y2 + ny}"/><line x1="${x1 - nx}" y1="${y1 - ny}" x2="${x2 - nx}" y2="${y2 - ny}"/>`;
-      const rungs = Math.max(2, Math.round(L / 22));
-      for (let k = 1; k < rungs; k++) { const t = k / rungs, rx = x1 + dx * t, ry = y1 + dy * t; svg += `<line x1="${rx + nx}" y1="${ry + ny}" x2="${rx - nx}" y2="${ry - ny}" stroke-width="2.5"/>`; }
-      svg += '</g>';
-    } else {
-      const mx = (x1 + x2) / 2, my = (y1 + y2) / 2, dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy), nx = -dy / L, ny = dx / L, w = Math.min(60, L * 0.35);
-      const d = `M${x1} ${y1} Q${mx + nx * w} ${my + ny * w} ${mx} ${my} T${x2} ${y2}`;
-      const hue = (Number(a) * 37) % 360;
-      svg += `<g class="snake"><path d="${d}" fill="none" stroke="hsl(${hue} 60% 30%)" stroke-width="11" stroke-linecap="round"/><path d="${d}" fill="none" stroke="hsl(${hue} 70% 48%)" stroke-width="7" stroke-linecap="round" stroke-dasharray="6 7"/><circle cx="${x1}" cy="${y1}" r="8" fill="hsl(${hue} 60% 30%)"/><circle cx="${x1 - 3}" cy="${y1 - 2}" r="1.8" fill="#fff"/><circle cx="${x1 + 3}" cy="${y1 - 2}" r="1.8" fill="#fff"/><line x1="${x1}" y1="${y1 + 6}" x2="${x1}" y2="${y1 + 13}" stroke="#ef4444" stroke-width="2"/></g>`;
-    }
+    if (b > Number(a)) svg += ladderSvg(x1, y1, x2, y2);
+  }
+  for (const [a, b] of Object.entries(JUMPS)) {
+    const [x1, y1] = cellXY(Number(a)), [x2, y2] = cellXY(b);
+    if (b < Number(a)) svg += snakeSvg(snakePts(x1, y1, x2, y2), (Number(a) * 37) % 360, a);
   }
   svg += `<text x="${S / 2}" y="${-C * 0.08}" text-anchor="middle" font-size="12" font-weight="700" fill="#fde68a">🏁 100</text>`;
   const occ = {};
   st.pos.forEach((p, pi) => {
     const [x0, y0] = cellXY(p); const k = occ[p] = (occ[p] || 0) + 1; const x = x0 + ((k - 1) % 2) * 12 - 6, y = y0 + Math.floor((k - 1) / 2) * 12 - 6;
-    const col = LUDO_COLORS[pi % 4].fill, g = pieceGlyph(pieces[pi]);
-    svg += `<g class="tok ${pi === st.turn && st.winner === null ? 'turn' : ''}" data-pi="${pi}" style="--tx:${x}px;--ty:${y}px"><circle cy="2" r="12" fill="rgba(0,0,0,.3)"/><circle r="12" fill="${col}" stroke="#fff" stroke-width="2.5"/>${g ? `<text y="5" text-anchor="middle" font-size="13">${g}</text>` : `<circle r="5" fill="#fff" opacity=".9"/>`}</g>`;
+    const col = LUDO_COLORS[pi % 4].fill;
+    svg += `<g class="tok ${pi === st.turn && st.winner === null ? 'turn' : ''}" data-pi="${pi}" style="--tx:${x}px;--ty:${y}px">${pieceSvg(pieces[pi], col, 30)}</g>`;
   });
   return svg + '</svg>';
 }

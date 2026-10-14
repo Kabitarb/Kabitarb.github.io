@@ -88,6 +88,7 @@ export class CallManager extends EventTarget {
     this.peer = peer; this.video = !!video; this.dir = 'out';
     this.callId = Math.random().toString(36).slice(2, 10);
     this.setState('outgoing');
+    this.app.ntfyPing?.([peer], video ? 'Incoming video call' : 'Incoming call', `${this.app.state.profile.name || 'A friend'} is calling you on Chatly`, 'telephone_receiver', 'urgent');
     try {
       this.local = await this.getMedia(this.video);
       this.video = this.local.getVideoTracks().length > 0;

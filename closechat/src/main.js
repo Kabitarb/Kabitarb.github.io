@@ -14,7 +14,7 @@ import { GameManager, GAMES, VIEWS, GAME_ORDER } from './games.js';
 import { ARCADE, ARCADE_ORDER, bestScore, recordScore } from './arcade.js';
 import { ENGINES } from './games/registry.js';
 import { randSeed } from './games/util.js';
-import { PIECES, PIECE_KEY, myPiece, LUDO_COLORS } from './games/ludo.js';
+import { PIECES, PIECE_KEY, myPiece, pieceSvg, LUDO_COLORS } from './games/ludo.js';
 import { ShareManager } from './share.js';
 import { WatchManager, parseMedia, MEDIA_RE } from './watch.js';
 import { TV_CHANNELS, TV_CATS, tvUrl, tvHue } from './tv.js';
@@ -846,6 +846,7 @@ function renderSettings() {
       <div class="srow"><span>Message notifications</span><button class="switch ${s.notifications ? 'on' : ''}" data-set="notifications"></button></div>
       <div class="srow"><span>Sounds</span><button class="switch ${s.sounds ? 'on' : ''}" data-set="sounds"></button></div>
       <div class="srow"><span>Vibration</span><button class="switch ${s.haptics ? 'on' : ''}" data-set="haptics"></button></div>
+      <div class="srow" id="s-ntfy" role="button" tabindex="0"><div><div>Alerts when Chatly is closed</div><div class="tiny muted">${app.state.profile.ntfy ? 'On — delivered through the free ntfy app' : 'Off — 1-minute setup with the free ntfy app'}</div></div></div>
       ${nativeKeep ? `<div class="srow"><div><div>Stay connected in background</div><div class="tiny muted">Keeps Chatly online while minimized, so messages arrive as banners you can reply to and calls show Answer / Decline. Uses some battery.</div></div><button class="switch ${s.bgKeepAlive !== false ? 'on' : ''}" data-set="bgKeepAlive"></button></div>` : ''}
       <div class="srow" style="flex-direction:column;align-items:stretch;gap:4px"><div class="row" style="justify-content:space-between;align-items:center"><span>When the app is closed</span><button class="switch ${s.push ? 'on' : ''}" data-set="push"></button></div><span class="tiny muted">${pushHint()}</span></div>
     </div>
@@ -2391,12 +2392,12 @@ function openLocalSetup(type) {
   const draw = () => {
     showModal(`<div class="lp"><div class="lobby-hero" style="--gc:${G.color}"><span>${G.icon}</span></div><h3>${esc(G.name)}</h3><p class="muted">Pass &amp; play — everyone on this phone</p>
       ${G.max > G.min ? `<div class="lp-count" role="radiogroup" aria-label="Players">${Array.from({ length: G.max - G.min + 1 }, (_, k) => G.min + k).map((k) => `<button class="chip ${k === n ? 'on' : ''}" data-n="${k}">${k} players</button>`).join('')}</div>` : `<p class="tiny muted">${G.max} players</p>`}
-      <div class="lp-players">${Array.from({ length: n }, (_, i) => `<div class="lp-row" style="--c:${LUDO_COLORS[i].fill}"><i></i><input data-i="${i}" maxlength="14" value="${esc(names[i])}" placeholder="Player ${i + 1}" aria-label="Player ${i + 1} name">${hasPieces ? `<button class="lp-piece" data-i="${i}" aria-label="Piece">${PIECES[pieces[i]].g || '●'}</button>` : ''}</div>`).join('')}</div>
+      <div class="lp-players">${Array.from({ length: n }, (_, i) => `<div class="lp-row" style="--c:${LUDO_COLORS[i].fill}"><i></i><input data-i="${i}" maxlength="14" value="${esc(names[i])}" placeholder="Player ${i + 1}" aria-label="Player ${i + 1} name">${hasPieces ? `<button class="lp-piece" data-i="${i}" aria-label="Piece: ${PIECES[pieces[i]].name}">${pieceIcon(pieces[i], LUDO_COLORS[i].fill)}</button>` : ''}</div>`).join('')}</div>
       <button class="btn primary" id="lp-start">Start</button></div>`);
     const mb = $('modal-body');
     mb.querySelectorAll('[data-n]').forEach((b) => { b.onclick = () => { readNames(); n = Number(b.dataset.n); haptic(); draw(); }; });
     const readNames = () => mb.querySelectorAll('input[data-i]').forEach((inp) => { names[Number(inp.dataset.i)] = inp.value; });
-    mb.querySelectorAll('.lp-piece').forEach((b) => { b.onclick = () => { const i = Number(b.dataset.i); const keys = Object.keys(PIECES); pieces[i] = keys[(keys.indexOf(pieces[i]) + 1) % keys.length]; b.textContent = PIECES[pieces[i]].g || '●'; haptic(6); }; });
+    mb.querySelectorAll('.lp-piece').forEach((b) => { b.onclick = () => { const i = Number(b.dataset.i); const keys = Object.keys(PIECES); pieces[i] = keys[(keys.indexOf(pieces[i]) + 1) % keys.length]; b.innerHTML = pieceIcon(pieces[i], LUDO_COLORS[i].fill); b.setAttribute('aria-label', 'Piece: ' + PIECES[pieces[i]].name); haptic(6); }; });
     $('lp-start').onclick = () => {
       readNames(); hideModal(); haptic(12);
       localStorage.setItem(LOCAL_SETUP_KEY, JSON.stringify({ n, names, pieces }));
@@ -2417,7 +2418,20 @@ function renderPlay() {
   host.querySelectorAll('[data-la]').forEach((b) => { b.onclick = () => { haptic(); openArcade(b.dataset.la, null); }; });
   wirePieceRow(host, renderPlay);
 }
-function pieceRowHtml() { const cur = myPiece(); return `<div class="piece-row" role="radiogroup" aria-label="Your piece">${Object.entries(PIECES).map(([k, v]) => `<button class="${k === cur ? 'on' : ''}" data-piece="${k}" title="${v.name}" aria-label="${v.name}"><span>${v.g || '●'}</span></button>`).join('')}</div>`; }
+function openNtfySetup() {
+  const topic = app.state.profile.ntfy || '';
+  showModal(`<div class="lp"><div class="lp-ico">🔔</div><h2>Alerts when Chatly is closed</h2><p class="muted">iPhone only lets App Store apps receive push. The free <b>ntfy</b> app can, so Chatly pings your private ntfy channel when a friend messages or calls you — even when Chatly is closed. ntfy only ever sees "ping", never your messages.</p>
+    ${topic ? `<ol class="steps"><li>Install ntfy: <a href="https://apps.apple.com/app/ntfy/id1625396347" target="_blank" rel="noopener">iPhone</a> · <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">Android</a></li><li>In ntfy tap <b>+</b> → Subscribe to topic → paste <code id="ntfy-topic">${topic}</code> <button class="btn small" id="ntfy-copy">Copy</button></li><li>Allow notifications for ntfy. Friends' pings now reach you.</li></ol><div class="lp-actions"><button class="btn" id="ntfy-test">Send me a test alert</button><button class="btn ghost" id="ntfy-off">Turn off</button></div>` : `<button class="btn primary" id="ntfy-on">Turn on</button>`}</div>`);
+  const on = $('ntfy-on'); if (on) on.onclick = async () => { const t = 'chatly-' + Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join(''); await app.setNtfy(t); haptic(); openNtfySetup(); refreshNtfyRow(); };
+  const off = $('ntfy-off'); if (off) off.onclick = async () => { await app.setNtfy(''); toast('Closed-app alerts off'); openNtfySetup(); refreshNtfyRow(); };
+  const cp = $('ntfy-copy'); if (cp) cp.onclick = () => { navigator.clipboard?.writeText(topic).then(() => toast('Topic copied')).catch(() => toast(topic)); };
+  const ts = $('ntfy-test'); if (ts) ts.onclick = () => { fetch('https://ntfy.sh/' + topic, { method: 'POST', body: 'If you see this, closed-app alerts work.', headers: { Title: 'Chatly test', Tags: 'tada', Click: location.href.split('#')[0] } }).then(() => toast('Test sent — check ntfy')).catch(() => toast('Could not reach ntfy.sh')); };
+}
+function refreshNtfyRow() { const r = document.getElementById('s-ntfy'); if (r) r.querySelector('.tiny').textContent = app.state.profile.ntfy ? 'On — delivered through the free ntfy app' : 'Off — 1-minute setup with the free ntfy app'; }
+document.addEventListener('click', (e) => { if (e.target.closest && e.target.closest('#s-ntfy')) openNtfySetup(); });
+
+function pieceRowHtml() { const cur = myPiece(); return `<div class="piece-row" role="radiogroup" aria-label="Your piece">${Object.entries(PIECES).map(([k, v]) => `<button class="${k === cur ? 'on' : ''}" data-piece="${k}" title="${v.name}" aria-label="${v.name}">${pieceIcon(k, '#3b82f6')}</button>`).join('')}</div>`; }
+const pieceIcon = (k, color, sz = 26) => `<svg viewBox="-12.5 -12.5 25 25" width="${sz}" height="${sz}" aria-hidden="true">${pieceSvg(k, color, 24)}</svg>`;
 function wirePieceRow(root, after) { root.querySelectorAll('[data-piece]').forEach((b) => { b.onclick = (e) => { e.stopPropagation(); localStorage.setItem(PIECE_KEY, b.dataset.piece); haptic(8); root.querySelectorAll('[data-piece]').forEach((x) => x.classList.toggle('on', x === b)); if (after) after(); }; }); }
 function tickGameTimer() {
   const s = G_().get(openGameId); const t = document.getElementById('g-timer'); if (!s || !t) return;
