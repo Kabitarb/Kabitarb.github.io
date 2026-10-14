@@ -5,18 +5,18 @@
 
 export const FILTERS = [
   { id: 'original',   name: 'Original',       p: {} },
-  { id: 'beauty',     name: 'Beauty 뽀샤시',   p: { smooth: 0.7, brightness: 0.06, tint: [0.02, 0.005, 0.015], bloom: 0.3, saturation: 0.04 } },
+  { id: 'beauty',     name: 'Beauty 뽀샤시',   p: { smooth: 0.9, brightness: 0.08, contrast: -0.05, tint: [0.025, 0.004, 0.012], bloom: 0.4, saturation: 0.04 } },
   { id: 'bw',         name: 'B&W',            p: { saturation: -1, contrast: 0.12 } },
   { id: 'sepia',      name: 'Sepia',          p: { sepia: 1, contrast: 0.02 } },
-  { id: 'softpink',   name: 'Soft Pink',      p: { tint: [0.07, 0.01, 0.03], brightness: 0.04, saturation: 0.05, bloom: 0.15 } },
+  { id: 'softpink',   name: 'Soft Pink',      p: { brightness: 0.07, tintHi: [0.10, 0.01, 0.05], shadows: 0.04, warmth: 0.03, saturation: -0.05 } },
   { id: 'peachy',     name: 'Peachy',         p: { warmth: 0.14, tint: [0.05, 0.015, -0.01], brightness: 0.03, saturation: 0.08 } },
-  { id: 'cleangirl',  name: 'Clean Girl',     p: { brightness: 0.08, contrast: 0.10, warmth: 0.05, fade: 0.02, saturation: 0.05, sharpen: 0.25 } },
+  { id: 'cleangirl',  name: 'Clean Girl',     p: { brightness: 0.06, contrast: 0.08, warmth: 0.04, saturation: 0.05, sharpen: 0.3 } },
   { id: 'latte',      name: 'Latte',          p: { warmth: 0.16, tint: [0.05, 0.02, -0.03], saturation: -0.22, shadows: 0.10, fade: 0.08 } },
-  { id: 'y2kflash',   name: 'Y2K Flash',      p: { brightness: 0.14, highlights: -0.10, contrast: 0.16, warmth: -0.06, vignette: 0.28, saturation: -0.05 } },
+  { id: 'y2kflash',   name: 'Y2K Flash',      p: { flash: 0.25, tintHi: [-0.03, 0.01, 0.06], contrast: 0.2, vignette: 0.35, saturation: -0.1 } },
   { id: 'disposable', name: 'Disposable 90s', p: { warmth: 0.14, grain: 0.35, contrast: -0.04, fade: 0.10, leak: 0.5, saturation: -0.08 } },
   { id: 'golden',     name: 'Golden Hour',    p: { warmth: 0.24, tint: [0.07, 0.03, -0.04], brightness: 0.03, saturation: 0.10, bloom: 0.12 } },
-  { id: 'seoulblue',  name: 'Seoul Blue',     p: { warmth: -0.16, brightness: 0.06, saturation: 0.02, tint: [-0.01, 0.01, 0.05], fade: 0.06 } },
-  { id: 'dreamy',     name: 'Dreamy',         p: { bloom: 0.65, brightness: 0.05, warmth: 0.06, saturation: 0.08, fade: 0.08 } },
+  { id: 'seoulblue',  name: 'Seoul Blue',     p: { brightness: 0.05, tintHi: [-0.02, 0.03, 0.07], saturation: 0.03, fade: 0.04 } },
+  { id: 'dreamy',     name: 'Dreamy',         p: { bloom: 0.9, fade: 0.1, warmth: 0.05, tintHi: [0.04, 0.01, 0.02], saturation: 0.05 } },
   { id: 'milk',       name: 'Milk',           p: { contrast: -0.18, brightness: 0.06, saturation: -0.10, fade: 0.18 } },
   { id: 'vintage',    name: 'Vintage',        p: { warmth: 0.18, contrast: -0.06, saturation: -0.28, fade: 0.18, grain: 0.28, vignette: 0.28 } },
   { id: 'noir',       name: 'Noir',           p: { saturation: -1, contrast: 0.32, brightness: -0.03, vignette: 0.22 } },
@@ -25,41 +25,56 @@ export function getFilter(id) { return FILTERS.find(f => f.id === id) || FILTERS
 
 const VERT = `attribute vec2 a;varying vec2 v;void main(){v=vec2(a.x*.5+.5,.5-a.y*.5);gl_Position=vec4(a,0.,1.);}`;
 const FRAG = `precision mediump float;varying vec2 v;uniform sampler2D t;
-uniform float uB,uC,uS,uW,uF,uG,uV,uBloom,uI,uSepia,uSh,uHi,uSmooth,uSharp,uLeak,uBeauty;
-uniform vec3 uTint;uniform vec2 uRes;uniform float uSeed;
+uniform float uB,uC,uS,uW,uF,uG,uV,uBloom,uI,uSepia,uSh,uHi,uSmooth,uSharp,uLeak,uBeauty,uFlash;
+uniform vec3 uTint,uTintHi;uniform vec2 uRes;uniform float uSeed;
 float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7))+uSeed)*43758.5453);}
 vec3 lu(vec2 uv){return texture2D(t,uv).rgb;}
 float skin(vec3 c){
   float y=dot(c,vec3(.299,.587,.114));
   float cbv=(c.b-y)*.564+0.5, crv=(c.r-y)*.713+0.5;
-  return smoothstep(0.,1.,(1.-abs((cbv-.44)*5.))*(1.-abs((crv-.62)*5.))+.001);
+  return smoothstep(0.,1.,(1.-abs((cbv-.46)*4.))*(1.-abs((crv-.60)*3.5))+.001);
 }
 void main(){
-  float sm=max(uSmooth,uBeauty*.8);
+  float sm=max(uSmooth,uBeauty*.95);
   vec3 c=lu(v);
   if(sm>0.){
-    vec2 r=min(uRes.x,uRes.y)*0.008/uRes;
+    vec2 r=min(uRes.x,uRes.y)*0.024/uRes;
+    float m=clamp(skin(c)*6.,0.,1.)*sm;
     vec3 acc=c; float w=1.;
     for(int i=0;i<12;i++){
       float a=float(i)*6.2832/12.; vec2 off=vec2(cos(a),sin(a))*r;
-      vec3 t1=lu(v+off),t2=lu(v+off*1.6),t3=lu(v+off*2.4);
-      float w1=exp(-8.*distance(t1,c));float w2=exp(-8.*distance(t2,c));float w3=exp(-8.*distance(t3,c));
-      acc+=t1*w1+t2*w2+t3*w3;w+=w1+w2+w3;
+      acc+=lu(v+off)+lu(v+off*1.5)+lu(v+off*2.2); w+=3.;
     }
-    vec3 smc=acc/w;
-    c=mix(c,smc,sm*clamp(skin(c)*2.5,0.,1.));
+    // edge-aware: luminance-gradient gate — eyes/hair/edges keep their detail
+    vec2 px=1.5/uRes;
+    float g=length(lu(v+vec2(px.x,0.))-lu(v-vec2(px.x,0.)))+length(lu(v+vec2(0.,px.y))-lu(v-vec2(0.,px.y)));
+    float keep=1.-smoothstep(.25,.6,g);
+    c=mix(c,acc/w,m*keep);
+    vec2 r2=r*1.5;
+    vec3 acc2=c; float w2=1.;
+    for(int i=0;i<8;i++){
+      float a=float(i)*6.2832/8.+0.4; vec2 off=vec2(cos(a),sin(a))*r2;
+      acc2+=lu(v+off); w2+=1.;
+    }
+    c=mix(c,acc2/w2,m*keep*0.9);
   }
   c+=uB+uBeauty*.05;
   if(uBloom>0.){
-    vec2 px=4./uRes;vec3 b=(lu(v+vec2(px.x,px.y))+lu(v+vec2(-px.x,px.y))+lu(v+vec2(px.x,-px.y))+lu(v+vec2(-px.x,-px.y)))*.25;
-    c=mix(c,max(c,b),uBloom*.5);
+    // resolution-scaled bloom: two rings at ~1.2% and ~2.4% of short side
+    vec2 p1=min(uRes.x,uRes.y)*0.012/uRes, p2=p1*2.;
+    vec3 b=(lu(v+vec2(p1.x,0.))+lu(v+vec2(-p1.x,0.))+lu(v+vec2(0.,p1.y))+lu(v+vec2(0.,-p1.y)))*.25
+         + (lu(v+vec2(p2.x,p2.y))+lu(v+vec2(-p2.x,p2.y))+lu(v+vec2(p2.x,-p2.y))+lu(v+vec2(-p2.x,-p2.y)))*.125;
+    b*=0.667;
+    c=mix(c,max(c,b),uBloom*.75)+b*uBloom*.12;
   }
   if(uSepia>0.){
     vec3 s=vec3(dot(c,vec3(.393,.769,.189)),dot(c,vec3(.349,.686,.168)),dot(c,vec3(.272,.534,.131)));
     c=mix(c,s,uSepia);
   }
-  c+=uTint;
   float l=dot(c,vec3(.299,.587,.114));
+  // tints: base tint flat-ish; highlight tint luma-weighted so shadows don't go muddy
+  c+=uTint;
+  c+=uTintHi*smoothstep(.35,.9,l);
   c=mix(vec3(l),c,1.+uS);
   c.r+=uW*.5;c.b-=uW*.5;
   // shadows lift / highlights compress
@@ -71,6 +86,10 @@ void main(){
     vec2 px=1.5/uRes;
     vec3 n=lu(v-vec2(0.,px.y))+lu(v+vec2(0.,px.y))+lu(v-vec2(px.x,0.))+lu(v+vec2(px.x,0.));
     c+= (c-n*.25)*uSharp;
+  }
+  if(uFlash>0.){
+    // radial camera-flash: bright center falling off
+    c+=uFlash*smoothstep(.85,.15,distance(v,vec2(.5)));
   }
   c-=uV*smoothstep(.35,.9,distance(v,vec2(.5)))*.3;
   if(uLeak>0.){
@@ -145,9 +164,10 @@ function applyGL(source, w, h, p, i, beauty) {
   f1('uV', p.vignette || 0); f1('uBloom', p.bloom || p.softGlow || 0);
   f1('uSepia', p.sepia || 0); f1('uSh', p.shadows || 0); f1('uHi', p.highlights || 0);
   f1('uSmooth', p.smooth || 0); f1('uSharp', p.sharpen || 0); f1('uLeak', p.leak || 0);
-  f1('uBeauty', beauty); f1('uI', i);
-  const t = p.tint || [0, 0, 0];
+  f1('uBeauty', beauty); f1('uI', i); f1('uFlash', p.flash || 0);
+  const t = p.tint || [0, 0, 0], th = p.tintHi || [0, 0, 0];
   gl.uniform3f(uni('uTint'), t[0], t[1], t[2]);
+  gl.uniform3f(uni('uTintHi'), th[0], th[1], th[2]);
   gl.uniform2f(uni('uRes'), w, h);
   gl.uniform1f(uni('uSeed'), 3.7);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -163,7 +183,7 @@ function applyCPU(source, w, h, p, i, beauty) {
   const b = (p.brightness || 0) + beauty * 0.05, ct = p.contrast || 0, s = p.saturation || 0,
         wr = p.warmth || 0, f = p.fade || 0, v = p.vignette || 0,
         sep = p.sepia || 0, sh = p.shadows || 0, hi = p.highlights || 0;
-  const tn = p.tint || [0, 0, 0];
+  const tn = p.tint || [0, 0, 0], th2 = p.tintHi || [0, 0, 0];
   for (let px = 0; px < a.length; px += 4) {
     const oR = a[px], oG = a[px + 1], oB = a[px + 2];
     let r = oR / 255, g = oG / 255, bl = oB / 255;
@@ -174,6 +194,8 @@ function applyCPU(source, w, h, p, i, beauty) {
     }
     r += tn[0]; g += tn[1]; bl += tn[2];
     const l = .299 * r + .587 * g + .114 * bl;
+    const hiw = Math.max(0, Math.min(1, (l - .35) / .55));
+    r += th2[0] * hiw; g += th2[1] * hiw; bl += th2[2] * hiw;
     r = l + (r - l) * (1 + s); g = l + (g - l) * (1 + s); bl = l + (bl - l) * (1 + s);
     r += wr * .5; bl -= wr * .5;
     const lift = Math.max(0, Math.min(1, (.5 - l) / .5)) * sh * .25;
@@ -185,6 +207,8 @@ function applyCPU(source, w, h, p, i, beauty) {
     const idx = px / 4, xx = idx % w, yy = (idx / w) | 0;
     const dv = Math.hypot(xx / w - .5, yy / h - .5);
     const vig = v * Math.max(0, Math.min(1, (dv - .35) / .55)) * .3;
+    const fl = (p.flash || 0) * Math.max(0, Math.min(1, (.85 - dv) / .7));
+    r += fl; g += fl; bl += fl;
     r -= vig; g -= vig; bl -= vig;
     a[px]     = Math.max(0, Math.min(255, (oR / 255 + (r - oR / 255) * i) * 255));
     a[px + 1] = Math.max(0, Math.min(255, (oG / 255 + (g - oG / 255) * i) * 255));
