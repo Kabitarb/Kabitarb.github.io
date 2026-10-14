@@ -1,7 +1,8 @@
 // Editor: preview canvas + toolbar + sheets (layout/frame/filter/photos/text/stickers/adjust/save).
 import { state, el, toast, openSheet, closeSheet, sheetOpen, emptyCell, fileStamp } from './state.js';
 import { LAYOUTS, SIZES, getLayout, layoutSize, exportSize, printSheetSize } from './layouts.js';
-import { THEMES, getTheme } from './themes.js';
+import { THEMES, THEME_CATEGORIES, getTheme } from './themes.js';
+import { applyFilter } from './filters.js';
 import { FILTERS } from './filters.js';
 import { render, ensureFonts, FONT_FAMILIES, DATE_FORMATS } from './render.js';
 import { EMOJI_STICKERS, ART_STICKERS, STICKER_ART } from './stickers.js';
@@ -55,14 +56,18 @@ export function renderEditor(root) {
   area.append(previewCanvas);
   wrap.append(area);
 
+  const ICON = (p) => `<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
   const TABS = [
-    ['Layout', '🖼️', openLayoutSheet], ['Frame', '🎀', openThemeSheet],
-    ['Filter', '✨', openFilterSheet], ['Photos', '📷', openPhotosSheet],
-    ['Text', '✏️', openTextSheet], ['Stickers', '💖', openStickerSheet],
+    ['Layout', ICON('<rect x="3" y="5" width="8" height="14" rx="1.5"/><rect x="13" y="5" width="8" height="7" rx="1.5"/><rect x="13" y="14" width="8" height="5" rx="1.5"/>'), openLayoutSheet],
+    ['Frame', ICON('<rect x="3" y="4" width="18" height="16" rx="3"/><rect x="6.5" y="7.5" width="11" height="9" rx="1.5"/>'), openThemeSheet],
+    ['Filter', ICON('<circle cx="12" cy="12" r="8"/><path d="M12 4v16M4 12h16"/><circle cx="12" cy="12" r="3"/>'), openFilterSheet],
+    ['Photos', ICON('<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9.5" cy="10" r="1.5"/><path d="M4 17l5-5 4 4 3-3 4 4"/>'), openPhotosSheet],
+    ['Text', ICON('<path d="M6 5h12M12 5v14M9 19h6"/>'), openTextSheet],
+    ['Stickers', ICON('<path d="M12 3l2.4 5 5.6.7-4.1 4 1 5.6-4.9-2.7-4.9 2.7 1-5.6-4.1-4 5.6-.7z"/>'), openStickerSheet],
   ];
   const bar = el('div', { class: 'toolbar' },
     TABS.map(([label, icon, fn]) =>
-      el('button', { onclick: fn }, el('span', { class: 'ti' }, icon), el('span', {}, label))));
+      el('button', { onclick: fn }, el('span', { class: 'ti', html: icon }), el('span', {}, label))));
   wrap.append(bar);
   root.append(wrap);
 
@@ -215,55 +220,78 @@ function renderMini(canvas, layout, project) {
 }
 
 function openThemeSheet() {
+  const tabs = el('div', { class: 'tabs seg' });
   const grid = el('div', { class: 'theme-grid' });
-  for (const t of THEMES) {
-    const sw = el('div', { class: 'theme-swatch' + (state.project.themeId === t.id ? ' on' : '') });
-    const c = el('canvas'); c.width = c.height = 140;
-    t.bg(c.getContext('2d'), 140, 140);
-    sw.append(c, el('div', { class: 'tname' }, t.name));
-    sw.onclick = () => {
-      state.project.themeId = t.id; needsDraw = true;
-      grid.querySelectorAll('.theme-swatch').forEach(x => x.classList.remove('on'));
-      sw.classList.add('on');
-    };
-    grid.append(sw);
-  }
-  openSheet(el('div', {}, el('h3', {}, 'Frame theme 프레임'), grid));
-}
-
-function openFilterSheet() {
-  const grid = el('div', { class: 'filter-grid' });
-  // thumbnail source: first filled cell, else placeholder
-  const srcCell = (state.project.cells || []).find(c => c && c.media);
-  const thumb = document.createElement('canvas'); thumb.width = thumb.height = 160;
-  const tctx = thumb.getContext('2d');
-  if (srcCell) {
-    const src = state.project.getMediaSource(srcCell.media, 0);
-    if (src) tctx.drawImage(src, 0, 0, 160, 160);
-  } else {
-    const g = tctx.createLinearGradient(0, 0, 160, 160);
-    g.addColorStop(0, '#FFC9D8'); g.addColorStop(1, '#A8D8FF');
-    tctx.fillStyle = g; tctx.fillRect(0, 0, 160, 160);
-    tctx.fillStyle = '#fff'; tctx.font = '40px Jua'; tctx.textAlign = 'center'; tctx.fillText('📷', 80, 100);
-  }
-  const slider = el('input', { type: 'range', min: 0, max: 100, value: state.project.filter.intensity });
-  slider.oninput = () => { state.project.filter.intensity = +slider.value; needsDraw = true; };
-  import('./filters.js').then(({ applyFilter, getFilter }) => {
-    for (const f of FILTERS) {
-      const sw = el('div', { class: 'filter-swatch' + (state.project.filter.id === f.id ? ' on' : '') });
-      const c = el('canvas'); c.width = c.height = 160;
-      const out = applyFilter(thumb, 160, 160, f, 1);
-      c.getContext('2d').drawImage(out, 0, 0);
-      sw.append(c, el('div', { class: 'tname' }, f.name));
+  let cat = getTheme(state.project.themeId).category || 'plain';
+  const fill = () => {
+    grid.innerHTML = '';
+    for (const t of THEMES.filter(t => t.category === cat)) {
+      const sw = el('div', { class: 'theme-swatch' + (state.project.themeId === t.id ? ' on' : '') });
+      const c = el('canvas'); c.width = c.height = 140;
+      t.bg(c.getContext('2d'), 140, 140);
+      if (t.decorate) t.decorate(c.getContext('2d'), 140, 140, [{ x: 30, y: 30, w: 80, h: 80 }]);
+      sw.append(c, el('div', { class: 'tname' }, t.name));
       sw.onclick = () => {
-        state.project.filter.id = f.id; needsDraw = true;
-        grid.querySelectorAll('.filter-swatch').forEach(x => x.classList.remove('on'));
+        state.project.themeId = t.id; needsDraw = true;
+        grid.querySelectorAll('.theme-swatch').forEach(x => x.classList.remove('on'));
         sw.classList.add('on');
       };
       grid.append(sw);
     }
-  });
-  openSheet(el('div', {}, el('h3', {}, 'Filter 필터'), grid,
+  };
+  for (const ct of THEME_CATEGORIES)
+    tabs.append(el('button', {
+      class: 'tab' + (ct.id === cat ? ' on' : ''),
+      onclick: e => { cat = ct.id; tabs.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === e.currentTarget)); fill(); },
+    }, ct.label));
+  openSheet(el('div', {}, el('h3', {}, 'Frame theme 프레임'), tabs, grid));
+  fill();
+}
+
+const filterThumbCache = new Map();
+function openFilterSheet() {
+  // thumbnail source: first filled cell, else gradient
+  const srcCell = (state.project.cells || []).find(c => c && c.media);
+  const thumb = document.createElement('canvas'); thumb.width = thumb.height = 128;
+  const tctx = thumb.getContext('2d');
+  if (srcCell) {
+    const src = state.project.getMediaSource(srcCell.media, 0);
+    if (src) tctx.drawImage(src, 0, 0, 128, 128);
+  } else {
+    const g = tctx.createLinearGradient(0, 0, 128, 128);
+    g.addColorStop(0, '#FFC9D8'); g.addColorStop(1, '#A8D8FF');
+    tctx.fillStyle = g; tctx.fillRect(0, 0, 128, 128);
+    tctx.fillStyle = '#fff'; tctx.font = '40px Jua'; tctx.textAlign = 'center'; tctx.fillText('♡', 64, 80);
+  }
+  // Beauty slider (applies on top of any filter)
+  const bLabel = el('label', {}, `Beauty 뽀샤시 — ${state.project.beauty}%`);
+  const beauty = el('input', { type: 'range', min: 0, max: 100, value: state.project.beauty });
+  beauty.oninput = () => { state.project.beauty = +beauty.value; bLabel.textContent = `Beauty 뽀샤시 — ${beauty.value}%`; needsDraw = true; };
+  // carousel of filter thumbnails
+  const row = el('div', { class: 'filter-carousel' });
+  const build = () => {
+    row.innerHTML = '';
+    for (const f of FILTERS) {
+      const sw = el('div', { class: 'filter-swatch' + (state.project.filter.id === f.id ? ' on' : '') });
+      const c = el('canvas'); c.width = c.height = 64;
+      const key = f.id;
+      if (!filterThumbCache.has(key)) filterThumbCache.set(key, applyFilter(thumb, 128, 128, f, 1, 0));
+      c.getContext('2d').drawImage(filterThumbCache.get(key), 0, 0, 64, 64);
+      sw.append(c, el('div', { class: 'tname' }, f.name));
+      sw.onclick = () => {
+        state.project.filter.id = f.id; needsDraw = true;
+        row.querySelectorAll('.filter-swatch').forEach(x => x.classList.remove('on'));
+        sw.classList.add('on');
+      };
+      row.append(sw);
+    }
+  };
+  build();
+  const slider = el('input', { type: 'range', min: 0, max: 100, value: state.project.filter.intensity });
+  slider.oninput = () => { state.project.filter.intensity = +slider.value; needsDraw = true; };
+  openSheet(el('div', {}, el('h3', {}, 'Filter 필터'),
+    el('div', { class: 'field' }, bLabel, beauty),
+    row,
     el('div', { class: 'field', style: 'margin-top:12px' }, el('label', {}, 'Intensity'), slider)));
 }
 

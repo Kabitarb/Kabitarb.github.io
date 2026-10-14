@@ -2,9 +2,10 @@
 import { attachRuntime } from './media.js';
 
 export const state = {
-  screen: 'home',
+  screen: 'theme',
+  themeTab: 'plain',
+  sizeId: '2x6',
   project: null,
-  layoutTab: '2x6',
   pendingFiles: [],
   booth: { shots: [], stream: null, countdown: 5, extra: true, live: false, mirror: true, facing: 'user', muted: false },
   trimTarget: null,   // {media, cellIndex | 'pick'}
@@ -13,10 +14,11 @@ export const state = {
   swapFirst: -1,
 };
 
-export function newProject(layoutId) {
+export function newProject(layoutId, themeId = 'plain-white') {
   const p = attachRuntime({
     layoutId,
-    themeId: 'strawberry',
+    themeId,
+    beauty: 0,
     filter: { id: 'original', intensity: 100 },
     text: {
       title: 'our cute day ♡', subtitle: 'Our Special Day',

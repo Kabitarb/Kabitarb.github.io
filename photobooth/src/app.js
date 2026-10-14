@@ -1,59 +1,82 @@
-// Dalkom Booth — SPA router + home + layout picker + source + pick + album.
+// Dalkom Booth — SPA. Flow: theme → size → source → (booth|trim|gallery) → editor → album.
 import { state, el, toast, newProject, emptyCell, closeSheet, clearToasts } from './state.js';
 import { LAYOUTS, SIZES, getLayout, layoutSize } from './layouts.js';
-import { getTheme } from './themes.js';
-import { render } from './render.js';
+import { THEMES, THEME_CATEGORIES, getTheme } from './themes.js';
+import { render, ensureFonts } from './render.js';
 import { attachRuntime, fileToMedia } from './media.js';
 import { renderBooth } from './booth.js';
 import { renderTrim } from './trim.js';
-import { renderEditor, fillCells, openSaveSheet, openAdjust } from './editor.js';
+import { renderEditor, fillCells, openSaveSheet, openAdjust, dirty } from './editor.js';
 import { albumList, albumDelete } from './album.js';
 import { isShell, shellVersion, hasPickLive, pickLive, haptic } from './bridge.js';
 
-const SCREENS = ['home', 'layout', 'source', 'booth', 'pick', 'trim', 'editor', 'album'];
+const SCREENS = ['theme', 'size', 'source', 'booth', 'pick', 'trim', 'editor', 'album'];
 const $ = id => document.getElementById(id);
-let boothCtl = null, navStack = [];
+let boothCtl = null;
+const navStack = [];
+
+// inline SVG line icons (24px, 2px stroke, round caps)
+const I = (paths) => `<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+export const ICONS = {
+  camera: I('<rect x="3" y="7" width="18" height="14" rx="3"/><circle cx="12" cy="14" r="3.5"/><path d="M8 7l1.2-2.4h5.6L16 7"/>'),
+  upload: I('<path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/>'),
+  film: I('<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 10h4M3 14h4M17 10h4M17 14h4"/>'),
+  album: I('<rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-5 4 4 3-3 4 4"/>'),
+  save: I('<path d="M12 4v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/>'),
+};
 
 function go(screen, push = true) {
   if (boothCtl && screen !== 'booth') { boothCtl.stopCam && boothCtl.stopCam(); boothCtl = null; }
   closeSheet();
   clearToasts();
+  hideCTA();
   const transient = ['trim', 'pick', 'booth'];
   if (push && state.screen !== screen && !transient.includes(state.screen) && !transient.includes(screen)) navStack.push(state.screen);
   state.screen = screen;
   for (const s of SCREENS) $('scr-' + s).classList.toggle('on', s === screen);
-  $('btn-back').classList.toggle('hidden', screen === 'home');
+  $('btn-back').classList.toggle('hidden', screen === 'theme');
   $('btn-save-top').classList.toggle('hidden', screen !== 'editor');
-  $('app-title').textContent = screen === 'home' ? '달콤부스' : (screen === 'editor' ? '편집 Edit' : '달콤부스');
+  $('btn-album').classList.toggle('hidden', screen === 'album');
+  $('app-title').textContent = screen === 'editor' ? '편집 Edit' : '달콤부스';
+  updateSteps();
   renderScreen(screen);
 }
-function goBack() { go(navStack.pop() || 'home', false); }
+function goBack() { go(navStack.pop() || 'theme', false); }
 
 $('btn-back').onclick = goBack;
 $('btn-save-top').onclick = () => openSaveSheet();
+$('btn-album').onclick = () => go('album');
+
+const STEP_ORDER = ['theme', 'size', 'source'];
+function updateSteps() {
+  const steps = $('steps');
+  const i = STEP_ORDER.indexOf(state.screen);
+  steps.classList.toggle('hidden', i < 0);
+  if (i < 0) return;
+  steps.querySelectorAll('.step').forEach((b, k) => {
+    b.classList.toggle('done', k < i);
+    b.classList.toggle('on', k === i);
+  });
+}
+$('steps').addEventListener('click', e => {
+  const b = e.target.closest('.step');
+  if (b && b.classList.contains('done')) go(b.dataset.s, false);
+});
 
 function renderScreen(s) {
   ({
-    home: renderHome, layout: renderLayoutPicker, source: renderSource,
+    theme: renderTheme, size: renderSize, source: renderSource,
     pick: renderPick, album: renderAlbum,
     editor: () => renderEditor($('scr-editor')),
   }[s] || (() => {}))();
 }
 
-// ---------- Home ----------
-const BUNNY = `
-<svg class="mascot" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-  <ellipse cx="38" cy="30" rx="13" ry="30" fill="#fff" stroke="#FFD3E2" stroke-width="3" transform="rotate(-8 38 30)"/>
-  <ellipse cx="82" cy="30" rx="13" ry="30" fill="#fff" stroke="#FFD3E2" stroke-width="3" transform="rotate(8 82 30)"/>
-  <ellipse cx="38" cy="32" rx="6" ry="20" fill="#FFC9D8" transform="rotate(-8 38 32)"/>
-  <ellipse cx="82" cy="32" rx="6" ry="20" fill="#FFC9D8" transform="rotate(8 82 32)"/>
-  <circle cx="60" cy="72" r="36" fill="#fff" stroke="#FFD3E2" stroke-width="3"/>
-  <circle cx="48" cy="68" r="4" fill="#5a4a52"/><circle cx="72" cy="68" r="4" fill="#5a4a52"/>
-  <ellipse cx="60" cy="78" rx="5" ry="3.5" fill="#FF8FB1"/>
-  <path d="M60 81.5 Q55 87 50 83 M60 81.5 Q65 87 70 83" stroke="#5a4a52" stroke-width="2" fill="none" stroke-linecap="round"/>
-  <circle cx="40" cy="80" r="6" fill="#FFD3E2" opacity=".7"/><circle cx="80" cy="80" r="6" fill="#FFD3E2" opacity=".7"/>
-  <text x="60" y="113" text-anchor="middle" font-size="11" fill="#F06E96" font-family="Jua">찰칵!</text>
-</svg>`;
+function showCTA(label, fn, disabled = false) {
+  const root = $('cta-root');
+  root.innerHTML = '';
+  root.append(el('button', { class: 'pill cta', onclick: fn, ...(disabled ? { disabled: true } : {}) }, label));
+}
+function hideCTA() { $('cta-root').innerHTML = ''; }
 
 async function checkUpdate() {
   if (!isShell()) return;
@@ -63,7 +86,7 @@ async function checkUpdate() {
     const latest = src.apps && src.apps[0] && src.apps[0].version;
     const mine = shellVersion();
     if (latest && mine && latest !== mine) {
-      $('scr-home').prepend(el('div', {
+      $('scr-theme').prepend(el('div', {
         class: 'update-banner',
         onclick: () => location.href = 'app/',
       }, `⬆ Update available (${latest}) — tap to install`));
@@ -71,66 +94,111 @@ async function checkUpdate() {
   } catch (e) {}
 }
 
-function renderHome() {
-  const root = $('scr-home');
-  root.innerHTML = '';
-  root.append(
-    el('div', { html: BUNNY }),
-    el('h2', { class: 'screen-title', style: 'text-align:center' }, 'Dalkom Booth ', el('span', { class: 'en' }, 'cute photo booth')),
-    el('div', { class: 'home-tag' }, '인생네컷 at home ♡ snap · frame · save'),
-    el('div', { class: 'home-buttons' },
-      el('button', { class: 'pill', onclick: () => startFlow('camera') }, '📸 찰칵! Booth (camera)'),
-      el('button', { class: 'pill blue', onclick: () => startFlow('gallery') }, '🖼️ Gallery photos'),
-      el('button', { class: 'pill lilac', onclick: () => startFlow('video') }, '🎬 Video / Live Photo'),
-      el('button', { class: 'pill secondary', onclick: () => go('album') }, '💝 My Album')),
-  );
-  checkUpdate();
+// ---------- Theme screen ----------
+function miniProject(over = {}) {
+  return attachRuntime({
+    layoutId: 'A',
+    themeId: state.project?.themeId || 'plain-white',
+    beauty: 0,
+    filter: { id: 'original', intensity: 100 },
+    text: { title: 'our cute day ♡', subtitle: 'Our Special Day', date: new Date().toISOString(), dateFormat: 'ymd', font: null, color: 'auto', show: true, showDate: true },
+    cells: [], stickers: [], ...over,
+  });
+}
+function renderCard(canvas, layoutId, themeId) {
+  const s = layoutSize(getLayout(layoutId));
+  const proj = miniProject({ layoutId, themeId });
+  const sc = canvas.width / s.w;
+  ensureFonts(proj, getTheme(themeId)).then(() =>
+    render(canvas.getContext('2d'), proj, { scale: sc }));
+  render(canvas.getContext('2d'), proj, { scale: sc });
 }
 
-// ---------- Layout picker ----------
-function startFlow(source) {
-  state.flowSource = source;
-  if (!state.project) state.project = newProject('D');
-  go('layout');
-}
-
-function renderLayoutPicker() {
-  const root = $('scr-layout');
+function renderTheme() {
+  const root = $('scr-theme');
   root.innerHTML = '';
-  root.append(el('h2', { class: 'screen-title' }, 'Pick a layout ', el('span', { class: 'en' }, '레이아웃')));
-  const tabs = el('div', { class: 'tabs' });
-  const groups = [['2x6', '2x6 Strip'], ['6x2', '6x2 Wide'], ['4x6L', '4x6 Landscape'], ['4x6P', '4x6 Portrait']];
-  const grid = el('div', { class: 'layout-grid' });
+  root.append(el('h2', { class: 'screen-title' }, 'Choose a theme ', el('span', { class: 'en' }, '테마')));
+  const tabs = el('div', { class: 'tabs seg' });
+  const grid = el('div', { class: 'theme-card-grid' });
   const fill = () => {
     grid.innerHTML = '';
-    for (const l of LAYOUTS.filter(l => l.size === state.layoutTab)) {
-      const card = el('div', { class: 'layout-card' + (state.project.layoutId === l.id ? ' on' : '') });
+    for (const t of THEMES.filter(t => t.category === state.themeTab)) {
+      const card = el('div', { class: 'theme-card' + (state.project?.themeId === t.id ? ' on' : '') });
       const c = el('canvas');
-      const s = layoutSize(l);
-      c.width = Math.round(s.w * 0.2); c.height = Math.round(s.h * 0.2);
-      card.append(c, el('div', { class: 'lname' }, `${l.id} · ${l.name}`),
-        el('div', { class: 'lmeta' }, `${l.cells.length} cuts`));
+      const s = layoutSize(getLayout('A'));
+      c.width = Math.round(s.w * 0.28); c.height = Math.round(s.h * 0.28);
+      card.append(c, el('div', { class: 'lname' }, t.name));
       card.onclick = () => {
-        state.project.layoutId = l.id;
-        const la = getLayout(l.id);
-        while (state.project.cells.length < la.cells.length) state.project.cells.push(emptyCell());
-        go('source');
+        if (state.project) state.project.themeId = t.id;
+        else state.selTheme = t.id;
+        state.selTheme = t.id;
+        grid.querySelectorAll('.theme-card').forEach(x => x.classList.remove('on'));
+        card.classList.add('on');
+        showCTA('Next →', () => go('size'));
       };
       grid.append(card);
-      const proj = {
-        ...state.project, layoutId: l.id,
-        text: { ...state.project.text, show: true }, cells: [], stickers: [],
-        getMediaSource: () => null,
-      };
-      render(c.getContext('2d'), proj, { scale: c.width / s.w });
+      renderCard(c, 'A', t.id);
     }
   };
-  for (const [id, label] of groups) {
-    const t = el('button', { class: 'tab' + (state.layoutTab === id ? ' on' : ''), onclick: () => { state.layoutTab = id; fill(); tabs.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t)); } }, label);
-    tabs.append(t);
+  for (const cat of THEME_CATEGORIES) {
+    const b = el('button', { class: 'tab' + (state.themeTab === cat.id ? ' on' : '') }, cat.label);
+    b.onclick = () => { state.themeTab = cat.id; tabs.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === b)); fill(); };
+    tabs.append(b);
   }
   root.append(tabs, grid);
   fill();
+  if (!state.project) state.project = newProject('D', 'plain-white');
+  if (state.selTheme) state.project.themeId = state.selTheme;
+  else if (state.project.themeId) state.selTheme = state.project.themeId;
+  // mark current
+  setTimeout(() => {
+    grid.querySelectorAll('.theme-card').forEach((c, i) => {
+      c.classList.toggle('on', THEMES.filter(t => t.category === state.themeTab)[i].id === state.project.themeId);
+    });
+  });
+  showCTA('Next →', () => go('size'));
+  checkUpdate();
+}
+
+// ---------- Size screen ----------
+const SIZE_ORDER = [['2x6', '2×6 Strip'], ['6x2', '6×2 Wide'], ['4x6L', '4×6 Land.'], ['4x6P', '4×6 Port.']];
+function renderSize() {
+  const root = $('scr-size');
+  root.innerHTML = '';
+  root.append(el('h2', { class: 'screen-title' }, 'Pick a size ', el('span', { class: 'en' }, '크기')));
+  const chips = el('div', { class: 'size-chips' });
+  for (const [id, label] of SIZE_ORDER) {
+    const s = SIZES[id];
+    const ar = s.w / s.h;
+    const iw = ar >= 1 ? 30 : Math.round(30 * ar), ih = ar >= 1 ? Math.round(30 / ar) : 30;
+    chips.append(el('button', {
+      class: 'size-chip' + (state.sizeId === id ? ' on' : ''),
+      onclick: (e) => { state.sizeId = id; chips.querySelectorAll('.size-chip').forEach(x => x.classList.remove('on')); e.currentTarget.classList.add('on'); fill(); },
+    }, el('span', { class: 'ar-box', style: `width:${iw}px;height:${ih}px` }), el('span', {}, label)));
+  }
+  const grid = el('div', { class: 'layout-grid' });
+  const fill = () => {
+    grid.innerHTML = '';
+    for (const l of LAYOUTS.filter(l => l.size === state.sizeId)) {
+      const card = el('div', { class: 'layout-card' + (state.project.layoutId === l.id ? ' on' : '') });
+      const c = el('canvas');
+      const s = layoutSize(l);
+      c.width = Math.round(s.w * 0.22); c.height = Math.round(s.h * 0.22);
+      card.append(c, el('div', { class: 'lname' }, `${l.id} · ${l.name}`), el('div', { class: 'lmeta' }, `${l.cells.length} cuts`));
+      card.onclick = () => {
+        state.project.layoutId = l.id;
+        while (state.project.cells.length < l.cells.length) state.project.cells.push(emptyCell());
+        grid.querySelectorAll('.layout-card').forEach(x => x.classList.remove('on'));
+        card.classList.add('on');
+        showCTA('Next →', () => go('source'));
+      };
+      grid.append(card);
+      renderCard(c, l.id, state.project.themeId);
+    }
+  };
+  root.append(chips, grid);
+  fill();
+  showCTA('Next →', () => go('source'));
 }
 
 // ---------- Source ----------
@@ -138,46 +206,53 @@ function renderSource() {
   const root = $('scr-source');
   root.innerHTML = '';
   const layout = getLayout(state.project.layoutId);
-  root.append(el('h2', { class: 'screen-title' }, `Add photos `, el('span', { class: 'en' }, `Layout ${layout.id} · ${layout.cells.length} cells`)));
+  const theme = getTheme(state.project.themeId);
+
+  const sum = el('div', { class: 'source-summary' });
+  const mini = el('canvas'); const s = layoutSize(layout);
+  mini.width = Math.round(s.w * 0.12); mini.height = Math.round(s.h * 0.12);
+  renderCard(mini, layout.id, theme.id);
+  mini.style.width = '56px';
+  sum.append(mini, el('div', { class: 'sum-txt' },
+    el('b', {}, `${theme.name} · ${layout.id} ${layout.name}`),
+    el('span', { class: 'en' }, `${layout.cells.length} cuts · ${SIZES[layout.size].label}`)),
+    el('button', { class: 'opt-chip', onclick: () => go('theme', false) }, 'Change'));
+  root.append(el('h2', { class: 'screen-title' }, 'Add photos ', el('span', { class: 'en' }, '사진')) , sum);
 
   const gInput = el('input', { type: 'file', accept: 'image/*,video/*', multiple: true, style: 'display:none' });
   const vInput = el('input', { type: 'file', accept: 'video/*', multiple: true, style: 'display:none' });
   gInput.onchange = () => galleryFiles(gInput.files);
   vInput.onchange = () => galleryFiles(vInput.files, true);
 
+  const card = (icon, title, hint, fn, id) => el('button', { class: 'src-card', onclick: fn, ...(id ? { 'data-id': id } : {}) },
+    el('span', { class: 'src-icon', html: icon }), el('span', { class: 'src-txt' }, el('b', {}, title), el('span', { class: 'en' }, hint)));
+
   const wrap = el('div', { class: 'source-buttons' },
-    el('button', { class: 'pill', onclick: () => go('booth') }, '📸 찰칵! Booth (camera)'),
-    el('button', { class: 'pill blue', onclick: () => gInput.click() }, '🖼️ Gallery photos'),
-    el('button', { class: 'pill lilac', onclick: () => vInput.click() }, '🎬 Video / Live Photo'),
-    el('button', {
-      class: 'pill secondary', onclick: () => go('editor')
-    }, '✏️ Go to editor'));
+    card(ICONS.camera, 'Take photos 찰칵', 'Booth camera · countdown', () => go('booth'), 'booth'),
+    card(ICONS.upload, 'Upload photos', 'From your gallery', () => gInput.click(), 'gallery'),
+    card(ICONS.film, 'Video / Live Photo', 'Trim to a 3s clip', () => vInput.click(), 'video'));
   if (isShell() && hasPickLive()) {
-    const lp = el('button', {
-      class: 'pill butter', onclick: async () => {
-        const items = await pickLive(layout.cells.length).catch(e => { toast('pickLive: ' + e); return []; });
-        for (const it of items) {
-          const bin = atob(it.b64); const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
-          const blob = new Blob([bytes], { type: it.mime });
-          blob.name = it.name && it.name.includes('.') ? it.name
-            : (it.name || 'live') + ({ 'video/quicktime': '.mov', 'video/mp4': '.mp4' }[it.mime] || '.mp4');
-          const media = await fileToMedia(blob);
-          state.trimQueue = state.trimQueue || [];
-          state.trimQueue.push(media);
-        }
-        if (state.trimQueue && state.trimQueue.length) nextTrim();
+    wrap.append(card(ICONS.film, 'Live Photo (iOS)', 'via iPhone Photos', async () => {
+      const items = await pickLive(layout.cells.length).catch(e => { toast('pickLive: ' + e); return []; });
+      state.trimQueue = state.trimQueue || [];
+      for (const it of items) {
+        const bin = atob(it.b64); const bytes = Uint8Array.from(bin, c => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: it.mime });
+        blob.name = it.name && it.name.includes('.') ? it.name
+          : (it.name || 'live') + ({ 'video/quicktime': '.mov', 'video/mp4': '.mp4' }[it.mime] || '.mp4');
+        state.trimQueue.push(await fileToMedia(blob));
       }
-    }, '🍎 Live Photo (iOS)');
-    wrap.insertBefore(lp, wrap.lastChild);
+      if (state.trimQueue.length) nextTrim();
+    }, 'livephoto'));
   } else {
-    wrap.append(el('div', { class: 'hint' }, '💡 Live Photo: in Photos tap Share → Save as Video, then pick it here'));
+    wrap.append(el('div', { class: 'hint' }, 'Live Photo: in Photos tap Share → Save as Video, then pick it here'));
   }
+  if (layout.cells.some((_, i) => state.project.cells[i] && state.project.cells[i].media))
+    wrap.append(el('button', { class: 'pill secondary', onclick: () => go('editor') }, 'Go to editor →'));
   root.append(wrap, gInput, vInput);
-  // Booth camera entry needs the booth screen
-  renderBoothIntoScreen();
 }
 
-function galleryFiles(files, onlyVideo) {
+function galleryFiles(files) {
   const list = [...files];
   state.trimQueue = [];
   const stills = [];
@@ -188,7 +263,6 @@ function galleryFiles(files, onlyVideo) {
       if (media.type === 'video') state.trimQueue.push(media);
       else stills.push(media);
     }
-    // fill cells with stills first
     const layout = getLayout(state.project.layoutId);
     for (const m of stills) {
       let idx = state.project.cells.findIndex((c, i) => i < layout.cells.length && (!c || !c.media));
@@ -204,18 +278,14 @@ function galleryFiles(files, onlyVideo) {
 function nextTrim() {
   const media = state.trimQueue.shift();
   if (!media) { go('editor'); return; }
-  state.trimAfter = () => nextTrim();
+  state.trimCellIndex = null;
   state.trimMedia = media;
+  state.trimAfter = () => nextTrim();
   go('trim');
 }
 
-// ---------- Booth + trim mount ----------
-function renderBoothIntoScreen() { /* booth rendered on demand below */ }
-
-const origRenderScreen = renderScreen;
 window.addEventListener('booth:trim', e => {
   const { media, cellIndex, autoFill } = e.detail;
-  state.trimQueue = state.trimQueue || [];
   if (autoFill) {
     const layout = getLayout(state.project.layoutId);
     let idx = state.project.cells.findIndex((c, i) => i < layout.cells.length && (!c || !c.media));
@@ -227,7 +297,7 @@ window.addEventListener('booth:trim', e => {
   go('trim');
 });
 
-// ---------- Pick screen ----------
+// ---------- Pick ----------
 function renderPick() {
   const root = $('scr-pick');
   root.innerHTML = '';
@@ -236,15 +306,14 @@ function renderPick() {
   root.append(el('h2', { class: 'screen-title' }, `Pick ${n} shots `, el('span', { class: 'en' }, 'tap in order')));
   const chosen = [];
   const grid = el('div', { class: 'pick-grid' });
-  const done = el('button', { class: 'pill', style: 'margin-top:16px;width:100%', disabled: true }, `Use ${n} photos →`);
+  const done = el('button', { class: 'pill cta-inline', disabled: true }, `Use ${n} photos →`);
   state.booth.shots.forEach((m, si) => {
     const it = el('div', { class: 'pick-item' });
-    const media = m;
-    if (media.type === 'video') {
+    if (m.type === 'video') {
       const v = el('video', { muted: true, playsinline: true, loop: true, autoplay: true });
-      v.src = URL.createObjectURL(media.blob); it.append(v);
+      v.src = URL.createObjectURL(m.blob); it.append(v);
     } else {
-      const img = el('img'); img.src = URL.createObjectURL(media.blob); it.append(img);
+      const img = el('img'); img.src = URL.createObjectURL(m.blob); it.append(img);
     }
     const badge = el('span', { class: 'badge hidden' });
     it.append(badge);
@@ -271,17 +340,16 @@ function renderPick() {
     });
     go('editor');
   };
-  root.append(el('div', { class: 'hint' }, `Tap ${n} shots in cell order — extra shots are kept for swapping later.`),
-    grid, done);
+  root.append(el('div', { class: 'hint' }, `Tap ${n} shots in cell order.`), grid, done);
 }
 
 // ---------- Album ----------
 async function renderAlbum() {
   const root = $('scr-album');
   root.innerHTML = '';
-  root.append(el('h2', { class: 'screen-title' }, 'My Album ', el('span', { class: 'en' }, '저장된 사진')));
+  root.append(el('h2', { class: 'screen-title' }, 'My Album ', el('span', { class: 'en' }, '저장')));
   const items = await albumList();
-  if (!items.length) { root.append(el('div', { class: 'empty' }, 'No saves yet — go make something cute! 🐰')); return; }
+  if (!items.length) { root.append(el('div', { class: 'empty' }, 'No saves yet — go make something cute!')); return; }
   const grid = el('div', { class: 'album-grid' });
   for (const it of items) {
     const card = el('div', { class: 'album-item' });
@@ -316,23 +384,20 @@ function openAlbumItem(it) {
           const { deliver } = await import('./editor.js');
           await deliver(it.blob, it.name || `dalkom-booth.${it.type === 'video' ? 'mp4' : 'png'}`, it.type === 'video' ? 'video' : 'image');
         }
-      }, '💾 Save / Share'),
+      }, 'Save / Share'),
       el('button', {
         class: 'pill secondary', onclick: async () => {
           await albumDelete(it.id); closeSheet(); renderAlbum(); toast('Deleted');
         }
-      }, '🗑 Delete'));
+      }, 'Delete'));
     node.append(row);
     openSheet(node);
   });
 }
 
-// ---------- Booth & trim screens (mounted dynamically) ----------
+// ---------- Booth & trim mounts ----------
 async function mountBooth() {
-  boothCtl = await renderBooth($('scr-booth'), {
-    onDone: () => go('pick'),
-    goBack,
-  });
+  boothCtl = await renderBooth($('scr-booth'), { onDone: () => go('pick'), goBack });
 }
 async function mountTrim() {
   await renderTrim($('scr-trim'), {
@@ -343,7 +408,6 @@ async function mountTrim() {
         const cell = state.project.cells[idx] || (state.project.cells[idx] = emptyCell());
         cell.media = media;
       } else {
-        state.trimQueue = state.trimQueue || [];
         const layout = getLayout(state.project.layoutId);
         let i = state.project.cells.findIndex((c, k) => k < layout.cells.length && (!c || !c.media));
         if (i < 0) i = layout.cells.length - 1;
@@ -362,9 +426,8 @@ go = function (s, push = true) {
   if (s === 'trim') mountTrim();
 };
 
-// ---------- SW ----------
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
   navigator.serviceWorker.register('sw.js').catch(() => {});
 }
 
-go('home');
+go('theme', false);

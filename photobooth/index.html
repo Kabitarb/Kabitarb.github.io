@@ -3,11 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
-<meta name="theme-color" content="#FFF8F0">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Dalkom">
+<meta name="theme-color" content="#FFFDFB">
 <title>달콤부스 Dalkom Booth</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -20,11 +16,17 @@
   <header id="topbar">
     <button id="btn-back" class="icon-btn hidden" aria-label="Back">←</button>
     <h1 id="app-title">달콤부스</h1>
-    <button id="btn-save-top" class="pill small hidden">저장 Save</button>
+    <button id="btn-album" class="icon-btn" aria-label="My Album">🖼</button>
+    <button id="btn-save-top" class="pill small hidden">Save 저장</button>
   </header>
+  <div id="steps" class="hidden">
+    <button class="step" data-s="theme">1 Theme</button><span class="dot">·</span>
+    <button class="step" data-s="size">2 Size</button><span class="dot">·</span>
+    <button class="step" data-s="source">3 Photos</button>
+  </div>
   <main id="screens">
-    <section class="screen" id="scr-home"></section>
-    <section class="screen" id="scr-layout"></section>
+    <section class="screen" id="scr-theme"></section>
+    <section class="screen" id="scr-size"></section>
     <section class="screen" id="scr-source"></section>
     <section class="screen" id="scr-booth"></section>
     <section class="screen" id="scr-pick"></section>
@@ -34,6 +36,7 @@
   </main>
   <div id="sheet-root"></div>
   <div id="toast-root"></div>
+  <div id="cta-root"></div>
 </div>
 <script type="module" src="src/app.js"></script>
 </body>
