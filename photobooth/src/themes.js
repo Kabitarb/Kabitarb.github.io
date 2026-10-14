@@ -113,54 +113,52 @@ function cornerLogo(ctx, W, H, color) {
 }
 
 // ---------- film helpers ----------
-function sprocketsAuto(ctx, W, H, color, ink) {
-  // vertical strips: sprockets on left/right; horizontal: top/bottom
+// band = reserved edge band width in du (kept clear of cells/text by the renderer)
+function sprocketsAuto(ctx, W, H, color, inkColor, band) {
+  // vertical strips: bands on left/right; horizontal: top/bottom
   const vert = H >= W;
-  ctx.fillStyle = color;
-  const s = Math.min(40, W * 0.05 + 18), step = s * 1.9, rad = s * 0.24;
-  const edge = 14;
+  const s = band * 0.42, step = s * 1.8, rad = s * 0.24;
   ctx.save();
-  ctx.font = `${Math.round(s * 0.55)}px "Courier New",monospace`;
+  ctx.fillStyle = color;
+  ctx.font = `${Math.round(band * 0.30)}px "Courier New",monospace`;
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   if (vert) {
-    const x1 = edge + s / 2, x2 = W - edge - s / 2;
-    let n = 0;
-    for (let y = edge; y < H - edge - s; y += step, n++) {
+    const x1 = band / 2, x2 = W - band / 2;
+    for (let y = s * 0.7; y < H - s; y += step) {
       for (const x of [x1, x2]) {
         ctx.beginPath(); ctx.roundRect(x - s / 2, y, s, s * 0.66, rad); ctx.fill();
       }
     }
-    ctx.fillStyle = ink;
-    // frame numbers + brand along edges, rotated
-    ctx.save(); ctx.translate(x1 + s * 0.9, H / 2); ctx.rotate(-Math.PI / 2);
-    ctx.fillText('1  ▶1A   2  ▶2A   3  ▶3A   4  ▶4A', 0, 0); ctx.restore();
-    ctx.save(); ctx.translate(x2 - s * 0.9, H / 2); ctx.rotate(-Math.PI / 2);
-    ctx.fillText('DALKOM 400   ▶   DALKOM 400', 0, 0); ctx.restore();
+    ctx.fillStyle = inkColor;
+    ctx.save(); ctx.translate(x1, H / 2); ctx.rotate(-Math.PI / 2);
+    ctx.fillText('1  ▶1A   2  ▶2A   3  ▶3A   4  ▶4A', 0, band * 0.34); ctx.restore();
+    ctx.save(); ctx.translate(x2, H / 2); ctx.rotate(-Math.PI / 2);
+    ctx.fillText('DALKOM 400   ▶   DALKOM 400', 0, -band * 0.34); ctx.restore();
   } else {
-    const y1 = edge + s / 2, y2 = H - edge - s / 2;
-    for (let x = edge; x < W - edge - s; x += step) {
+    const y1 = band / 2, y2 = H - band / 2;
+    for (let x = s * 0.7; x < W - s; x += step) {
       for (const y of [y1, y2]) {
         ctx.beginPath(); ctx.roundRect(x, y - s * 0.33, s, s * 0.66, rad); ctx.fill();
       }
     }
-    ctx.fillStyle = ink;
-    ctx.fillText('1  ▶1A   2  ▶2A   3  ▶3A', W / 2, y1 + s * 0.9);
-    ctx.fillText('DALKOM 400  ▶  DALKOM 400', W / 2, y2 - s * 0.9);
+    ctx.fillStyle = inkColor;
+    ctx.fillText('1  ▶1A   2  ▶2A   3  ▶3A   4  ▶4A   5  ▶5A', W / 2, y1 + band * 0.34);
+    ctx.fillText('DALKOM 400   ▶   DALKOM 400   ▶   DALKOM 400', W / 2, y2 - band * 0.34);
   }
   ctx.restore();
 }
 function filmDecorate(color, ink) {
-  return (ctx, W, H) => sprocketsAuto(ctx, W, H, color, ink);
+  return (ctx, W, H, cells, info) => sprocketsAuto(ctx, W, H, color, ink, info.band);
 }
-function cinemaDecorate(ctx, W, H, cells) {
-  ctx.fillStyle = '#fff';
-  ctx.font = `600 44px "Courier New",monospace`;
+function cinemaDecorate(ctx, W, H, cells, info) {
+  const band = Math.max(info.band, 30);
+  ctx.font = `600 ${Math.round(band * 0.55)}px "Courier New",monospace`;
   ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
   ctx.fillStyle = '#FF3B30';
-  ctx.beginPath(); ctx.arc(52, 56, 16, 0, 7); ctx.fill();
-  ctx.fillText('REC', 80, 60);
+  ctx.beginPath(); ctx.arc(band * 0.62, band / 2, band * 0.2, 0, 7); ctx.fill();
+  ctx.fillText('REC', band * 0.95, band / 2 + 2);
   ctx.fillStyle = '#fff'; ctx.textAlign = 'right';
-  ctx.fillText('00:00:03:12', W - 40, 60);
+  ctx.fillText('00:00:03:12', W - band * 0.35, band / 2 + 2);
   // corner brackets around each cell
   ctx.strokeStyle = 'rgba(255,255,255,.85)'; ctx.lineWidth = 6; ctx.lineCap = 'round';
   const L = 60, o = -10;
@@ -176,18 +174,108 @@ function cinemaDecorate(ctx, W, H, cells) {
 }
 
 // ---------- written (handwriting margin) helpers ----------
-// margin areas around the union of cells
-function margins(W, H, cells) {
-  const b = cells.reduce((a, c) => ({
+// margin areas around the union of rects (cells + text blocks)
+function margins(W, H, rects) {
+  const b = rects.reduce((a, c) => ({
     l: Math.min(a.l, c.x), t: Math.min(a.t, c.y),
     r: Math.max(a.r, c.x + c.w), b: Math.max(a.b, c.y + c.h),
   }), { l: W, t: H, r: 0, b: 0 });
   const areas = [];
-  if (b.t > 60) areas.push({ x: 0, y: 0, w: W, h: b.t, dir: 'h' });
-  if (H - b.b > 60) areas.push({ x: 0, y: b.b, w: W, h: H - b.b, dir: 'h' });
-  if (b.l > 60) areas.push({ x: 0, y: 0, w: b.l, h: H, dir: 'v' });
-  if (W - b.r > 60) areas.push({ x: b.r, y: 0, w: W - b.r, h: H, dir: 'v' });
+  if (b.t > 50) areas.push({ x: 0, y: 0, w: W, h: b.t, dir: 'h' });
+  if (H - b.b > 50) areas.push({ x: 0, y: b.b, w: W, h: H - b.b, dir: 'h' });
+  if (b.l > 50) areas.push({ x: 0, y: 0, w: b.l, h: H, dir: 'v' });
+  if (W - b.r > 50) areas.push({ x: b.r, y: 0, w: W - b.r, h: H, dir: 'v' });
   return areas;
+}
+// horizontal gaps between rows of cells (never overlaps text blocks)
+function cellGaps(cells, texts) {
+  const hit = (r) => texts.some(t => r.x < t.x + t.w && r.x + r.w > t.x && r.y < t.y + t.h && r.y + r.h > t.y);
+  const rows = [];
+  for (const c of cells) {
+    const row = rows.find(r => r.top < c.y + c.h && r.bottom > c.y);
+    if (row) { row.top = Math.min(row.top, c.y); row.bottom = Math.max(row.bottom, c.y + c.h); }
+    else rows.push({ top: c.y, bottom: c.y + c.h });
+  }
+  rows.sort((a, b) => a.top - b.top);
+  const gaps = [];
+  for (let i = 0; i + 1 < rows.length; i++) {
+    const g = { x: 0, y: rows[i].bottom, w: 0, h: rows[i + 1].top - rows[i].bottom, dir: 'h' };
+    if (g.h > 44 && !hit({ ...g, x: 0, w: 0 })) gaps.push(g);
+  }
+  return gaps;
+}
+// all free regions: margins + reserved bands + cell gaps
+function freeAreas(W, H, cells, texts, info) {
+  const areas = margins(W, H, cells.concat(texts || []));
+  if (info && info.bands) for (const b of info.bands) areas.push(b);
+  const w = Math.max(...cells.map(c => c.x + c.w)) - Math.min(...cells.map(c => c.x));
+  for (const g of cellGaps(cells, texts || [])) areas.push({ ...g, w });
+  return areas.sort((a, b) => b.w * b.h - a.w * a.h);
+}
+// fit-and-place: measure each item, scale to region, stack without overlap, drop if <60%
+function placeTexts(ctx, regions, items) {
+  for (const a of regions) {
+    if (!items.length) break;
+    if (a.dir === 'h') {
+      let y = a.y + 8;
+      for (let i = 0; i < items.length;) {
+        const it = items[i];
+        ctx.font = `${it.size}px ${it.font}`;
+        let size = Math.min(it.size, a.h * 0.5);
+        ctx.font = `${size}px ${it.font}`;
+        const tw = ctx.measureText(it.text).width;
+        if (tw > a.w * 0.9) size *= (a.w * 0.9) / tw;
+        const lineH = Math.max(size * 1.5, it.size * 0.6 * 1.5);
+        if (size < it.size * 0.6 || y + lineH > a.y + a.h) { i++; continue; }
+        y += lineH / 2;
+        wtext(ctx, it.text, a.x + a.w / 2, y, size, it.rot || 0, it.color || ink, it.font);
+        y += lineH / 2;
+        items.splice(i, 1);
+      }
+    } else {
+      let x = a.x + a.w / 2;
+      for (let i = 0; i < items.length;) {
+        const it = items[i];
+        let size = Math.min(it.size, a.w * 0.6);
+        ctx.font = `${size}px ${it.font}`;
+        const tw = ctx.measureText(it.text).width;
+        if (tw > a.h * 0.85) size *= (a.h * 0.85) / tw;
+        if (size < it.size * 0.6) { i++; continue; }
+        ctx.save(); ctx.translate(x, a.y + a.h / 2); ctx.rotate(-Math.PI / 2 + (it.rot || 0));
+        ctx.fillStyle = it.color || ink; ctx.font = `${size}px ${it.font}`;
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(it.text, 0, 0); ctx.restore();
+        items.splice(i, 1);
+        x += size * 1.8;
+        if (x > a.x + a.w - size) break;
+      }
+    }
+  }
+  return items; // leftovers, unused by caller or ignored
+}
+// place phrases into free regions; tiny doodles may touch photo corners
+function writeInMargins(ctx, W, H, cells, info, phrases, doodles, seed = 3) {
+  const rnd = rng(seed);
+  const areas = freeAreas(W, H, cells, info.texts || [], info);
+  const j = () => (rnd() - 0.5) * 0.12;
+  const items = phrases.map(t => ({ text: t, size: Math.min(W, H) * 0.065, font: HAND, rot: j() }));
+  placeTexts(ctx, areas, items);
+  if (doodles) {
+    const rnd2 = rng(seed + 99);
+    const sMax = Math.min(W, H) * 0.04;
+    let di = 0;
+    for (const a of areas) {
+      const count = a.dir === 'h' ? 2 : 3;
+      for (let k = 0; k < count && di < doodles.length; k++, di++) {
+        doodles[di](a.x + a.w * (0.2 + rnd2() * 0.6), a.y + a.h * (0.15 + rnd2() * 0.7), (rnd2() - 0.5) * 0.5, sMax);
+      }
+    }
+    // a couple may overlap cell corners
+    for (let k = 0; k < 2 && di < doodles.length; k++, di++) {
+      const c = cells[di % cells.length];
+      doodles[di](c.x + c.w - sMax * 0.6, c.y + c.h - sMax * 0.6, (rnd2() - 0.5) * 0.5, sMax);
+    }
+  }
 }
 function wtext(ctx, txt, x, y, size, rot, color = ink, font = HAND) {
   ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
@@ -238,62 +326,21 @@ function wArrow(ctx, x, y, s, rot, color = ink) {
   ctx.moveTo(s * 0.5, -s * 0.45); ctx.lineTo(s, 0); ctx.lineTo(s * 0.5, s * 0.45);
   ctx.stroke(); ctx.restore();
 }
-// place phrases/doodles into margins with seeded jitter
-function writeInMargins(ctx, W, H, cells, phrases, doodles, seed = 3) {
-  const rnd = rng(seed);
-  const areas = margins(W, H, cells);
-  const j = () => (rnd() - 0.5) * 0.14;
-  let pi = 0;
-  for (const a of areas) {
-    if (a.dir === 'h') {
-      const size = Math.min(a.h * 0.42, 64);
-      const rows = a.h > 170 ? 2 : 1;
-      for (let r = 0; r < rows; r++) {
-        const y = a.y + a.h * (rows === 1 ? 0.5 : (r + 0.5) / rows);
-        const n = Math.min(2, phrases.length - pi);
-        for (let k = 0; k < n && pi < phrases.length; k++, pi++) {
-          const x = a.x + a.w * (n === 1 ? 0.5 : (k ? 0.72 : 0.28));
-          wtext(ctx, phrases[pi], x, y, size * (phrases[pi].length > 14 ? 0.8 : 1), j());
-        }
-      }
-    } else {
-      const size = Math.min(a.w * 0.55, 56);
-      const n = Math.min(2, phrases.length - pi);
-      for (let k = 0; k < n && pi < phrases.length; k++, pi++) {
-        const y = a.y + a.h * (n === 1 ? 0.5 : (k ? 0.7 : 0.3));
-        ctx.save(); ctx.translate(a.x + a.w / 2, y); ctx.rotate(-Math.PI / 2 + j());
-        ctx.fillStyle = ink; ctx.font = `${size}px ${HAND}`;
-        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(phrases[pi], 0, 0); ctx.restore();
-      }
-    }
-  }
-  // leftover phrases on photo corners
-  while (pi < phrases.length) {
-    const c = cells[pi % cells.length];
-    wtext(ctx, phrases[pi], c.x + c.w - 90, c.y + 34, 40, j(), '#fff');
-    pi++;
-  }
-  if (doodles) {
-    const rnd2 = rng(seed + 99);
-    let di = 0;
-    for (const a of areas) {
-      const count = a.dir === 'h' ? 2 : 3;
-      for (let k = 0; k < count && di < doodles.length; k++, di++) {
-        doodles[di](a.x + a.w * (0.2 + rnd2() * 0.6), a.y + a.h * (0.15 + rnd2() * 0.7), (rnd2() - 0.5) * 0.5);
-      }
-    }
-    while (di < doodles.length) { // overlap cell corners slightly
-      const c = cells[di % cells.length];
-      doodles[di](c.x + c.w - 20, c.y + c.h - 16, (rnd2() - 0.5) * 0.5);
-      di++;
-    }
-  }
-}
-
 const T = (o) => o;
 const todayYear = new Date().getFullYear();
 const todayShort = () => { const d = new Date(); return `${d.getMonth() + 1}/${d.getDate()}`; };
+
+// reserve: fractions of the canvas SHORT side kept clear of cells/text.
+// number = all edges; {top,right,bottom,left}; or fn(W,H)->object.
+export const longEdges = (f) => (W, H) => (H >= W ? { left: f, right: f } : { top: f, bottom: f });
+export function resolveReserve(theme, W, H) {
+  const r = theme.reserve;
+  if (!r) return { t: 0, r: 0, b: 0, l: 0 };
+  const s = Math.min(W, H);
+  const o = typeof r === 'function' ? r(W, H)
+    : typeof r === 'number' ? { top: r, right: r, bottom: r, left: r } : r;
+  return { t: (o.top || 0) * s, r: (o.right || 0) * s, b: (o.bottom || 0) * s, l: (o.left || 0) * s };
+}
 
 export const THEMES = [
   // ===== PLAIN =====
@@ -360,106 +407,114 @@ export const THEMES = [
 
   // ===== FILM =====
   T({ id: 'film-black', name: 'Black Film', category: 'film', radius: 0, border: null, shadow: null,
+      reserve: longEdges(0.1),
       textColor: '#E8D9B8', subColor: '#a89877', font: 'Gaegu',
       bg: (c, W, H) => { c.fillStyle = '#151515'; c.fillRect(0, 0, W, H); },
       decorate: filmDecorate('rgba(255,255,255,.85)', 'rgba(255,255,255,.6)') }),
   T({ id: 'film-white', name: 'White Film', category: 'film', radius: 0, border: null, shadow: null,
+      reserve: longEdges(0.1),
       textColor: '#2B2B2B', subColor: '#8A8A8A', font: 'Gaegu',
       bg: (c, W, H) => { c.fillStyle = '#F7F5F0'; c.fillRect(0, 0, W, H); },
       decorate: filmDecorate('rgba(20,20,20,.85)', 'rgba(20,20,20,.55)') }),
   T({ id: 'amber', name: 'Amber Negative', category: 'film', radius: 0, border: null, shadow: null,
+      reserve: longEdges(0.1),
       textColor: '#FFE9C9', subColor: '#e0b88f', font: 'Gaegu',
       bg: (c, W, H) => { const g = c.createLinearGradient(0, 0, 0, H); g.addColorStop(0, '#C8743A'); g.addColorStop(1, '#8E4A22'); c.fillStyle = g; c.fillRect(0, 0, W, H); },
       decorate: filmDecorate('rgba(40,20,8,.8)', 'rgba(255,233,201,.8)') }),
   T({ id: 'kraft', name: 'Kraft Vintage', category: 'film', radius: 0, border: { color: '#fff', width: 10 }, shadow: { color: 'rgba(120,90,50,.25)', blur: 10, dy: 5 },
+      reserve: longEdges(0.1),
       textColor: '#6B543A', subColor: '#A08862', font: 'Nanum Pen Script',
       bg: (c, W, H) => { c.fillStyle = '#E6D5BC'; c.fillRect(0, 0, W, H); noise(c, W, H, '#C9B494'); },
-      decorate: (c, W, H) => { sprocketsAuto(c, W, H, 'rgba(107,84,58,.5)', 'rgba(107,84,58,.7)'); stamp(c, W, H); } }),
+      decorate: (c, W, H, cells, info) => { sprocketsAuto(c, W, H, 'rgba(107,84,58,.5)', 'rgba(107,84,58,.7)', info.band); } }),
   T({ id: 'cinema', name: 'Cinema', category: 'film', radius: 0, border: null, shadow: null,
+      reserve: { top: 0.07 },
       textColor: '#FFFFFF', subColor: '#BBBBBB', font: 'Gaegu',
       bg: (c, W, H) => { c.fillStyle = '#0c0c0c'; c.fillRect(0, 0, W, H); },
       decorate: cinemaDecorate }),
 
   // ===== WRITTEN =====
   T({ id: 'besties', name: 'Besties', category: 'written', radius: 8, border: { color: '#eee', width: 4 }, shadow: null,
-      textColor: ink, subColor: '#9a8f85', font: 'Gaegu',
+      textColor: ink, subColor: '#9a8f85', font: 'Gaegu', defaultTitle: 'best friends forever ♡',
       bg: (c, W, H) => { c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, W, H); },
-      decorate: (c, W, H, cells) => writeInMargins(c, W, H, cells,
-        ['best friends forever ♡', 'bff', 'always together'],
-        [(x, y, r) => wHeart(c, x, y, 26, r), (x, y, r) => wHeart(c, x, y, 18, r, '#FF8FB1'),
-         (x, y, r) => wSwirl(c, x, y, 24, r), (x, y, r) => wHeart(c, x, y, 22, r)], 3) }),
+      decorate: (c, W, H, cells, info) => writeInMargins(c, W, H, cells, info,
+        ['bff', 'always together'],
+        [(x, y, r, s) => wHeart(c, x, y, Math.min(26, s), r), (x, y, r, s) => wHeart(c, x, y, Math.min(18, s), r, '#FF8FB1'),
+         (x, y, r, s) => wSwirl(c, x, y, Math.min(24, s), r), (x, y, r, s) => wHeart(c, x, y, Math.min(22, s), r)], 3) }),
   T({ id: 'lovenotes', name: 'Love Notes', category: 'written', radius: 8, border: { color: '#eee', width: 4 }, shadow: null,
-      textColor: '#C93A50', subColor: '#9a8f85', font: 'Gaegu',
+      textColor: '#C93A50', subColor: '#9a8f85', font: 'Gaegu', defaultTitle: 'i love us',
       bg: (c, W, H) => { c.fillStyle = '#FFFDFB'; c.fillRect(0, 0, W, H); },
-      decorate: (c, W, H, cells) => writeInMargins(c, W, H, cells,
-        ['i love us', 'you & me', 'forever ♡'],
-        [(x, y, r) => wHeart(c, x, y, 28, r), (x, y, r) => wHeart(c, x, y, 20, r),
-         (x, y, r) => wHeart(c, x, y, 24, r), (x, y, r) => wSwirl(c, x, y, 22, r, '#E0526B')], 7) }),
+      decorate: (c, W, H, cells, info) => writeInMargins(c, W, H, cells, info,
+        ['you & me', 'forever ♡'],
+        [(x, y, r, s) => wHeart(c, x, y, Math.min(28, s), r), (x, y, r, s) => wHeart(c, x, y, Math.min(20, s), r),
+         (x, y, r, s) => wHeart(c, x, y, Math.min(24, s), r), (x, y, r, s) => wSwirl(c, x, y, Math.min(22, s), r, '#E0526B')], 7) }),
   T({ id: 'mood', name: "Today's Mood", category: 'written', radius: 8, border: { color: '#eee', width: 4 }, shadow: null,
-      textColor: ink, subColor: '#9a8f85', font: 'Gaegu',
+      textColor: ink, subColor: '#9a8f85', font: 'Gaegu', defaultTitle: "today's mood: happy",
       bg: (c, W, H) => { c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, W, H); },
-      decorate: (c, W, H, cells) => writeInMargins(c, W, H, cells,
-        ["today's mood: happy", 'say cheese!', 'so cute'],
-        [(x, y, r) => wStar(c, x, y, 22, r), (x, y, r) => wStar(c, x, y, 16, r, '#E0A83B'),
-         (x, y, r) => wSmiley(c, x, y, 20), (x, y, r) => wStar(c, x, y, 20, r)], 11) }),
+      decorate: (c, W, H, cells, info) => writeInMargins(c, W, H, cells, info,
+        ['say cheese!', 'so cute'],
+        [(x, y, r, s) => wStar(c, x, y, Math.min(22, s), r), (x, y, r, s) => wStar(c, x, y, Math.min(16, s), r, '#E0A83B'),
+         (x, y, r, s) => wSmiley(c, x, y, Math.min(20, s)), (x, y, r, s) => wStar(c, x, y, Math.min(20, s), r)], 11) }),
   T({ id: 'seouldiary', name: 'Seoul Diary', category: 'written', radius: 8, border: { color: '#eee', width: 4 }, shadow: null,
-      textColor: ink, subColor: '#9a8f85', font: 'Gaegu',
+      textColor: ink, subColor: '#9a8f85', font: 'Gaegu', defaultTitle: `seoul ♡ ${todayYear}`,
       bg: (c, W, H) => { c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, W, H); },
-      decorate: (c, W, H, cells) => writeInMargins(c, W, H, cells,
-        [`seoul ♡ ${todayYear}`, '우리 오늘 예쁘다', '서울 데이트'],
-        [(x, y, r) => wArrow(c, x, y, 26, r + 0.3), (x, y, r) => wHeart(c, x, y, 20, r, '#FF8FB1'),
-         (x, y, r) => wArrow(c, x, y, 22, r - 0.5), (x, y, r) => wSwirl(c, x, y, 20, r)], 17) }),
+      decorate: (c, W, H, cells, info) => writeInMargins(c, W, H, cells, info,
+        ['우리 오늘 예쁘다', '서울 데이트'],
+        [(x, y, r, s) => wArrow(c, x, y, Math.min(26, s), r + 0.3), (x, y, r, s) => wHeart(c, x, y, Math.min(20, s), r, '#FF8FB1'),
+         (x, y, r, s) => wArrow(c, x, y, Math.min(22, s), r - 0.5), (x, y, r, s) => wSwirl(c, x, y, Math.min(20, s), r)], 17) }),
   T({ id: 'script', name: 'Script', category: 'written', radius: 8, border: { color: '#eee', width: 4 }, shadow: null,
-      textColor: ink, subColor: '#9a8f85', font: 'Caveat',
+      textColor: ink, subColor: '#9a8f85', font: 'Caveat', defaultTitle: 'photo booth',
       bg: (c, W, H) => { c.fillStyle = '#FFFEFB'; c.fillRect(0, 0, W, H); },
-      decorate: (c, W, H, cells) => {
+      decorate: (c, W, H, cells, info) => {
+        const areas = freeAreas(W, H, cells, info.texts || [], info).filter(a => a.dir === 'v');
         const b = cells.reduce((a, cc) => ({ l: Math.min(a.l, cc.x), r: Math.max(a.r, cc.x + cc.w), b: Math.max(a.b, cc.y + cc.h) }), { l: W, r: 0, b: 0 });
-        const x = W - b.r > 60 ? (W + b.r) / 2 : b.l / 2;
-        wtext(c, 'photo booth', x, H / 2, Math.min(72, Math.max(40, W * 0.05)), -Math.PI / 2 - 0.03, ink, 'Caveat');
-        wtext(c, todayShort(), W / 2, H - 26, 44, 0.02, '#8A8A8A', 'Caveat');
+        const side = W - b.r >= b.l ? { x: (W + b.r) / 2, w: W - b.r } : { x: b.l / 2, w: b.l };
+        if (side.w > 40)
+          wtext(c, 'photo booth', side.x, H / 2, Math.min(72, side.w * 0.5), -Math.PI / 2 - 0.03, ink, 'Caveat');
+        if (H - b.b > 90)
+          wtext(c, todayShort(), W / 2, b.b + (H - b.b) * 0.55, Math.min(44, (H - b.b) * 0.4), 0.02, '#8A8A8A', 'Caveat');
       } }),
   T({ id: 'doodle', name: 'Doodle', category: 'written', radius: 8, border: { color: '#eee', width: 4 }, shadow: null,
-      textColor: ink, subColor: '#9a8f85', font: 'Gaegu',
+      textColor: ink, subColor: '#9a8f85', font: 'Gaegu', defaultTitle: 'cute!!',
       bg: (c, W, H) => { c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, W, H); },
-      decorate: (c, W, H, cells) => writeInMargins(c, W, H, cells,
-        ['cute!!', 'wow ♡'],
-        [(x, y, r) => wSmiley(c, x, y, 22), (x, y, r) => wSwirl(c, x, y, 26, r),
-         (x, y, r) => wHeart(c, x, y, 22, r, '#FF8FB1'), (x, y, r) => wStar(c, x, y, 20, r),
-         (x, y, r) => wSwirl(c, x, y, 18, r, '#7A8FB5')], 23) }),
+      decorate: (c, W, H, cells, info) => writeInMargins(c, W, H, cells, info,
+        ['wow ♡'],
+        [(x, y, r, s) => wSmiley(c, x, y, Math.min(22, s)), (x, y, r, s) => wSwirl(c, x, y, Math.min(26, s), r),
+         (x, y, r, s) => wHeart(c, x, y, Math.min(22, s), r, '#FF8FB1'), (x, y, r, s) => wStar(c, x, y, Math.min(20, s), r),
+         (x, y, r, s) => wSwirl(c, x, y, Math.min(18, s), r, '#7A8FB5')], 23) }),
   T({ id: 'newspaper', name: 'Newspaper', category: 'written', radius: 0, border: null, shadow: null,
-      textColor: '#1a1a1a', subColor: '#666', font: 'Quicksand',
+      reserve: { top: 0.1 },
+      textColor: '#1a1a1a', subColor: '#666', font: 'Quicksand', defaultTitle: 'our headlines',
       bg: (c, W, H) => { c.fillStyle = '#FDFBF7'; c.fillRect(0, 0, W, H); },
-      decorate: (c, W, H, cells) => {
-        const b = cells.reduce((a, cc) => ({ t: Math.min(a.t, cc.y), b: Math.max(a.b, cc.y + cc.h) }), { t: H, b: 0 });
-        const headY = Math.min(b.t, 120), footY = b.b;
-        ctx2(c => {
-          c.fillStyle = '#1a1a1a'; c.textAlign = 'center'; c.font = '700 90px Georgia,serif';
-          c.fillText('THE DAILY US', W / 2, Math.max(90, headY * 0.55));
-          c.font = `32px Georgia,serif`; c.fillStyle = '#666';
-          c.fillText(`Vol. 1 · ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`, W / 2, Math.max(150, headY * 0.55 + 60));
-          c.strokeStyle = '#1a1a1a'; c.lineWidth = 3;
-          c.beginPath(); c.moveTo(30, Math.max(40, headY * 0.55 - 70)); c.lineTo(W - 30, Math.max(40, headY * 0.55 - 70)); c.stroke();
-          // fake column bars in bottom margin
-          if (H - footY > 140) {
-            const rnd = rng(31); c.fillStyle = '#bbb';
-            for (let col = 0; col < 3; col++)
-              for (let ln = 0; ln < 4; ln++)
-                c.fillRect(40 + col * ((W - 80) / 3), footY + 60 + ln * 26, (W - 110) / 3 * (0.75 + rnd() * 0.2), 10);
-          }
-        });
-        function ctx2(f) { f(c); }
+      decorate: (c, W, H, cells, info) => {
+        const band = info.band;
+        // masthead inside the reserved top band only
+        c.fillStyle = '#1a1a1a'; c.textAlign = 'center'; c.textBaseline = 'middle';
+        c.font = `700 ${Math.round(band * 0.52)}px Georgia,serif`;
+        c.fillText('THE DAILY US', W / 2, band * 0.34);
+        c.strokeStyle = '#1a1a1a'; c.lineWidth = 3;
+        c.beginPath(); c.moveTo(30, band * 0.62); c.lineTo(W - 30, band * 0.62); c.stroke();
+        c.font = `${Math.round(band * 0.24)}px Georgia,serif`; c.fillStyle = '#666';
+        c.fillText(`Vol. 1 · ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}`, W / 2, band * 0.8);
+        // fake column bars only in free bottom space
+        const areas = freeAreas(W, H, cells, info.texts || [], info).filter(a => a.dir === 'h' && a.y > 0 && a.h > 110);
+        for (const a of areas.slice(0, 1)) {
+          const rnd = rng(31); c.fillStyle = '#bbb';
+          const y0 = a.y + 20;
+          for (let col = 0; col < 3; col++)
+            for (let ln = 0; ln < Math.min(4, (a.h - 40) / 30); ln++)
+              c.fillRect(a.x + 40 + col * ((a.w - 80) / 3), y0 + ln * 30, (a.w - 110) / 3 * (0.7 + rnd() * 0.25), 10);
+        }
       } }),
   T({ id: 'ticket', name: 'Ticket', category: 'written', radius: 8, border: { color: '#eee', width: 4 }, shadow: null,
-      textColor: '#7a4a1f', subColor: '#b08a5a', font: 'Caveat',
+      reserve: { bottom: 0.11 },
+      textColor: '#7a4a1f', subColor: '#b08a5a', font: 'Caveat', defaultTitle: 'best night ever',
       bg: (c, W, H) => { c.fillStyle = '#FFFDF6'; c.fillRect(0, 0, W, H); },
-      decorate: (c, W, H, cells) => {
-        const b = cells.reduce((a, cc) => ({ t: Math.min(a.t, cc.y), b: Math.max(a.b, cc.y + cc.h), l: Math.min(a.l, cc.x), r: Math.max(a.r, cc.x + cc.w) }), { t: H, b: 0, l: W, r: 0 });
-        // perforation line across bottom margin
-        const py = H - b.b > 80 ? b.b + (H - b.b) * 0.45 : b.t - 40;
+      decorate: (c, W, H, cells, info) => {
+        const band = info.band, py = H - band;
         c.save(); c.setLineDash([18, 14]); c.strokeStyle = '#c9a86a'; c.lineWidth = 4;
-        c.beginPath(); c.moveTo(b.l, py); c.lineTo(b.r, py); c.stroke(); c.restore();
-        wtext(c, 'ADMIT ONE · Dalkom Cinema', W / 2, py + (H - py) * 0.45, 54, 0.02, '#7a4a1f', 'Caveat');
-        wtext(c, 'keep this stub ♡', W / 2, py + (H - py) * 0.45 + 60, 40, -0.02, '#b08a5a', 'Caveat');
+        c.beginPath(); c.moveTo(30, py); c.lineTo(W - 30, py); c.stroke(); c.restore();
+        wtext(c, 'ADMIT ONE · Dalkom Cinema', W / 2, py + band * 0.42, band * 0.36, 0.02, '#7a4a1f', 'Caveat');
+        wtext(c, 'keep this stub ♡', W / 2, py + band * 0.75, band * 0.26, -0.02, '#b08a5a', 'Caveat');
       } }),
 ];
 

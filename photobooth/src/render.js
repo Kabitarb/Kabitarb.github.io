@@ -3,7 +3,7 @@
 // Canvas must already be sized to size.w*scale x size.h*scale.
 
 import { getLayout, layoutSize } from './layouts.js';
-import { getTheme } from './themes.js';
+import { getTheme, resolveReserve } from './themes.js';
 import { getFilter, applyFilter } from './filters.js';
 
 export const FONT_FAMILIES = [
@@ -137,6 +137,26 @@ function drawTextBlock(ctx, block, project, theme) {
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
   ctx.fillStyle = color;
 
+  if (block.roles[0] === 'titledate' && theme.category === 'written') {
+    // written themes: title is the main handwriting line, date on its own line
+    const h = block.h;
+    const titleSize = h * 0.5, dateSize = h * 0.3;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillStyle = color;
+    ctx.font = `${titleSize}px "${font}", "Apple SD Gothic Neo", "Noto Sans KR", cursive`;
+    const title = t.title || theme.defaultTitle || 'dalkom booth';
+    // shrink to fit width
+    let ts = titleSize;
+    while (ts > 10 && ctx.measureText(title).width > block.w * 0.94) { ts *= 0.92; ctx.font = `${ts}px "${font}", "Apple SD Gothic Neo", "Noto Sans KR", cursive`; }
+    ctx.fillText(title, cx, block.y + h * 0.32);
+    if (t.showDate !== false) {
+      ctx.font = `500 ${dateSize}px Quicksand, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
+      ctx.fillStyle = subColor;
+      ctx.fillText(dateStr, cx, block.y + h * 0.78);
+    }
+    ctx.restore();
+    return;
+  }
   if (block.roles[0] === 'titledate') {
     // one line: title left-ish + date, centered as a row
     const h = block.h;
@@ -165,7 +185,7 @@ function drawTextBlock(ctx, block, project, theme) {
   const items = [];
   for (const role of block.roles) {
     if (role === 'title') {
-      const { lines, size } = wrapText(ctx, t.title || 'dalkom booth', font, '', Math.min(block.h * 0.5, block.w / 6), block.w);
+      const { lines, size } = wrapText(ctx, t.title || theme.defaultTitle || 'dalkom booth', font, '', Math.min(block.h * 0.5, block.w / 6), block.w);
       for (const ln of lines) items.push({ text: ln, size, family: font, color, gap: size * 0.15 });
     } else if (role === 'subtitle') {
       const size = Math.min(block.h * 0.4, 46);
@@ -225,12 +245,29 @@ export function render(ctx, project, { scale = 1, time = 0, preview = false } = 
   const beauty = (project.beauty || 0) / 100;
   const filterEng = (src, w, h) => applyFilter(src, w, h, filter, intensity, beauty);
 
+  // reserved bands: map all layout rects into the inset content box
+  const res = resolveReserve(theme, size.w, size.h);
+  const bw = size.w - res.l - res.r, bh = size.h - res.t - res.b;
+  const mapR = (r) => ({
+    x: res.l + r.x / size.w * bw, y: res.t + r.y / size.h * bh,
+    w: r.w / size.w * bw, h: r.h / size.h * bh,
+  });
+  const cells = layout.cells.map(mapR);
+  const texts = (layout.text || []).map(b => ({ ...b, ...mapR(b) }));
+  const band = Math.max(res.t, res.r, res.b, res.l);
+  const bands = [];
+  if (res.t) bands.push({ x: 0, y: 0, w: size.w, h: res.t, dir: 'h' });
+  if (res.b) bands.push({ x: 0, y: size.h - res.b, w: size.w, h: res.b, dir: 'h' });
+  if (res.l) bands.push({ x: 0, y: 0, w: res.l, h: size.h, dir: 'v' });
+  if (res.r) bands.push({ x: size.w - res.r, y: 0, w: res.r, h: size.h, dir: 'v' });
+  const info = { reserve: res, band, bands, texts, box: { x: res.l, y: res.t, w: bw, h: bh } };
+
   ctx.save();
   ctx.scale(scale, scale);
   theme.bg(ctx, size.w, size.h);
 
   // cells
-  layout.cells.forEach((rect, i) => {
+  cells.forEach((rect, i) => {
     const cell = project.cells[i] || {};
     ctx.save();
     if (theme.shadow) {
@@ -255,10 +292,10 @@ export function render(ctx, project, { scale = 1, time = 0, preview = false } = 
   });
 
   // text
-  for (const block of layout.text || []) drawTextBlock(ctx, block, project, theme);
+  for (const block of texts) drawTextBlock(ctx, block, project, theme);
 
   // decorations (under stickers)
-  if (theme.decorate) theme.decorate(ctx, size.w, size.h, layout.cells);
+  if (theme.decorate) theme.decorate(ctx, size.w, size.h, cells, info);
 
   // stickers
   for (const st of project.stickers || []) drawSticker(ctx, st, size.w, size.h);
