@@ -27,7 +27,7 @@ export function cellXY(n) {
   return [(col + 0.5) * C, (9 - row + 0.5) * C];
 }
 function boardSvg(st, myIdx, pieces, names) {
-  let svg = `<svg viewBox="${-C * 0.6} ${-C * 0.3} ${S + C * 1.2} ${S + C * 0.9}" class="snl">`;
+  let svg = `<svg viewBox="${-C * 0.95} ${-C * 0.3} ${S + C * 1.55} ${S + C * 0.9}" class="snl">`;
   svg += `<rect x="-4" y="-4" width="${S + 8}" height="${S + 8}" rx="10" fill="#7c3f12"/>`;
   for (let n = 1; n <= 100; n++) { const [x, y] = cellXY(n); const dark = (Math.floor((n - 1) / 10) + n) % 2; svg += `<rect x="${x - C / 2}" y="${y - C / 2}" width="${C}" height="${C}" fill="${dark ? '#fef3c7' : '#fde68a'}"/><text x="${x - C / 2 + 4}" y="${y - C / 2 + 12}" font-size="10" fill="#92400e">${n}</text>`; }
   for (const [a, b] of Object.entries(JUMPS)) {

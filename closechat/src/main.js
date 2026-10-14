@@ -2488,7 +2488,7 @@ async function leaveGame() {
 $('game-quit').onclick = leaveGame;
 $('game-mini-leave').onclick = (e) => { e.stopPropagation(); leaveGame(); };
 let lastDone = null, gameView = null, gameViewFor = null;
-function dropGameView() { if (gameView) { try { gameView.unmount(); } catch {} } gameView = null; gameViewFor = null; }
+function dropGameView() { if (lsObs) { lsObs.disconnect(); lsObs = null; } if (gameView) { try { gameView.unmount(); } catch {} } gameView = null; gameViewFor = null; }
 function gameCtx(s) {
   if (s.local) return { get my() { return ENGINES[s.type].over(s.state) ? -1 : s.state.turn; }, get pk() { return ENGINES[s.type].over(s.state) ? '' : s.players[s.state.turn]; }, local: true, nameOf: (p) => pname(s, p), avatar: (p, cls) => avatarHtml(p, cls, pname(s, p)), move: (mv) => localGames.move(s.id, mv), haptic, fx, confetti, toast, reduced: reducedMotion() };
   return { my: games.myIndex(s), pk: app.pk, nameOf: (p) => (p === app.pk ? 'You' : app.nameOf(p)), avatar: avatarHtml, move: (mv) => games.move(s.id, mv), haptic, fx, confetti, toast, reduced: reducedMotion() };
@@ -2528,6 +2528,20 @@ window.addEventListener('message', (e) => {
   $('arcade-again').onclick = () => { ov.classList.add('hidden'); const f = $('arcade-frame'); if (f) f.focus(); };
   if (gameMini) renderArcade();
 });
+let lsObs = null;
+// Pass & play: the views address whoever's turn it is as "you"; name them instead.
+function localStatusObserver(host, s) {
+  if (lsObs) lsObs.disconnect();
+  const fix = () => {
+    if (s.status !== 'playing' || !s.state || ENGINES[s.type].over(s.state)) return;
+    const cur = pname(s, s.players[s.state.turn]);
+    host.querySelectorAll('.game-status').forEach((el) => {
+      const h = el.innerHTML, n = h.replace(/^(\s*)Your (turn|shot|move|throw|roll)/, `$1${esc(cur)}'s $2`).replace(/^(\s*)You /, `$1${esc(cur)} `);
+      if (n !== h) el.innerHTML = n;
+    });
+  };
+  lsObs = new MutationObserver(fix); lsObs.observe(host, { childList: true, subtree: true, characterData: true }); fix();
+}
 function renderGame() {
   if (arcadeOpen) { renderArcade(); return; }
   const s = G_().get(openGameId); if (!s) { closeGamePanel(); return; }
@@ -2575,6 +2589,7 @@ function renderGame() {
     body.innerHTML = ''; const host = document.createElement('div'); host.className = 'g-view g-' + s.type; body.appendChild(host);
     const foot = document.createElement('div'); foot.className = 'g-foot'; foot.id = 'g-foot'; body.appendChild(foot);
     gameView = VIEWS[s.type](gameCtx(s)); gameViewFor = key; gameView.mount(host);
+    if (s.local) localStatusObserver(host, s);
   }
   renderGameFoot(s);
   clearInterval(gameTimerIv); gameTimerIv = setInterval(tickGameTimer, 1000);

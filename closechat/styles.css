@@ -1545,7 +1545,7 @@ body.call-mini-voice #game.full .game-body { padding-top: calc(112px + var(--saf
 .lp-row input { flex: 1; min-width: 0; background: none; border: 0; color: var(--fg); font-size: 16px; padding: 8px 0; outline: none; }
 .lp-piece { width: 40px; height: 40px; border-radius: 12px; background: var(--bg2); border: 1px solid var(--line); font-size: 20px; color: var(--fg); }
 .lp .btn.primary { width: 100%; max-width: 340px; margin-top: 6px; }
-.snl { width: 100%; max-width: 440px; aspect-ratio: 1 / 1.03; height: auto; display: block; margin: 0 auto; border-radius: 14px; }
+.snl { width: 100%; max-width: 440px; aspect-ratio: 1 / 1.0; overflow: visible; height: auto; display: block; margin: 0 auto; border-radius: 14px; }
 #game.full .snl { max-width: var(--bmax); }
 .snl text { pointer-events: none; user-select: none; }
 .snl .tok { transform: translate(var(--tx), var(--ty)); transition: transform .35s var(--ios); will-change: transform; }
@@ -1561,3 +1561,7 @@ body.call-mini-voice #game.full .game-body { padding-top: calc(112px + var(--saf
 .g-score.many { flex-wrap: wrap; gap: 6px 8px; }
 .g-score.many .g-vs { display: none; }
 .g-score.many .g-player { padding: 4px 8px; }
+
+.tabbar { overflow: hidden; }
+.tabbar button { flex: 1 1 0; min-width: 0; padding-inline: 2px; font-size: 10.5px; }
+.tabbar button span { max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
