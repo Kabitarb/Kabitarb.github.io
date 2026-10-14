@@ -144,10 +144,10 @@ export function renderLudo(s, myIdx, nameOf, opts = {}) {
   const pieceOf = (pi) => (s.pieces && s.pieces[s.players[pi]]) || (st.pieces && st.pieces[pi]) || 'coin';
   const over = st.phase === 'done' || (st.winner !== null && st.finished.length >= st.n - 1);
   const rot = opts.rotate === false || myIdx < 0 ? 0 : ((3 - st.colors[myIdx] + 4) % 4) * 90;
-  let svg = `<svg viewBox="0 0 ${S} ${S}" class="ludo" style="--rot:${rot}deg"><g class="board" transform="rotate(${rot} ${cx} ${cx})">`;
+  let svg = `<svg viewBox="0 0 ${S} ${S}" class="ludo" style="--rot:${rot}deg"><defs><linearGradient id="lgloss" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".30"/><stop offset=".5" stop-color="#fff" stop-opacity=".06"/><stop offset="1" stop-color="#000" stop-opacity=".14"/></linearGradient><radialGradient id="lwell" cx=".5" cy=".4" r=".75"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#eef1f5"/></radialGradient><filter id="lshade" x="-10%" y="-10%" width="120%" height="130%"><feDropShadow dx="0" dy="1.5" stdDeviation="1.6" flood-color="#000" flood-opacity=".28"/></filter></defs><g class="board" transform="rotate(${rot} ${cx} ${cx})">`;
   for (let ci = 0; ci < 4; ci++) {
     const [ox, oy] = BASE_ORIGIN[ci]; const active = st.colors.includes(ci); const fill = active ? colorFill(ci) : '#9aa3ad';
-    svg += `<rect x="${ox * C}" y="${oy * C}" width="${6 * C}" height="${6 * C}" fill="${fill}" opacity="${active ? 1 : .3}"/><rect x="${(ox + 1) * C}" y="${(oy + 1) * C}" width="${4 * C}" height="${4 * C}" rx="14" fill="#fff"/>`;
+    svg += `<rect x="${ox * C}" y="${oy * C}" width="${6 * C}" height="${6 * C}" fill="${fill}" opacity="${active ? 1 : .3}"/><rect x="${ox * C}" y="${oy * C}" width="${6 * C}" height="${6 * C}" fill="url(#lgloss)" opacity="${active ? 1 : .3}"/><rect x="${(ox + 1) * C}" y="${(oy + 1) * C}" width="${4 * C}" height="${4 * C}" rx="14" fill="url(#lwell)" stroke="rgba(0,0,0,.10)" stroke-width="1" filter="url(#lshade)"/>`;
     for (const [bx, by] of BASE_SPOTS) svg += `<circle cx="${(ox + bx + 0.5) * C}" cy="${(oy + by + 0.5) * C}" r="${C * 0.5}" fill="${fill}" opacity="${active ? 1 : .35}"/><circle cx="${(ox + bx + 0.5) * C}" cy="${(oy + by + 0.5) * C}" r="${C * 0.5}" fill="none" stroke="#fff" stroke-width="2.5" opacity=".9"/>`;
   }
   TRACK.forEach(([c, r], i) => {
