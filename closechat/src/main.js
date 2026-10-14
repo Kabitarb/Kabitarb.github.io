@@ -2366,7 +2366,7 @@ class LocalGames {
     const names = setup.names.map((n, i) => (n || '').trim() || `Player ${i + 1}`);
     this.setup = { type, names, pieces: setup.pieces || [] };
     const players = names.map((_, i) => 'local:' + i);
-    const s = { id: 'local' + Date.now().toString(36), chatId: 'local', type, host: players[0], players, names, local: true, pieces: Object.fromEntries(players.map((p, i) => [p, PIECES[setup.pieces?.[i]] ? setup.pieces[i] : 'coin'])), status: 'playing', seq: 1, state: ENGINES[type].init(names.length, randSeed()), ts: Date.now() };
+    const s = { id: 'local-' + Date.now().toString(36), chatId: 'local', type, host: players[0], players, names, local: true, pieces: Object.fromEntries(players.map((p, i) => [p, PIECES[setup.pieces?.[i]] ? setup.pieces[i] : 'coin'])), status: 'playing', seq: 1, state: ENGINES[type].init(names.length, randSeed()), ts: Date.now() };
     this.s = s; return s;
   }
   invite(_chatId, type) { if (this.s && this.s.status !== 'done') this.s.status = 'done'; return this.start(type, this.setup || { names: ['Player 1', 'Player 2'] }); }
@@ -2380,7 +2380,7 @@ class LocalGames {
   quit(id) { const s = this.get(id); if (s) s.status = 'done'; }
 }
 const localGames = new LocalGames();
-const G_ = (id = openGameId) => (id && String(id).startsWith('local') ? localGames : games);
+const G_ = (id = openGameId) => (id && String(id).startsWith('local-') ? localGames : games);
 const LOCAL_SETUP_KEY = 'chatly:local:setup';
 function openLocalSetup(type) {
   const G = GAMES[type]; if (!G) return;
@@ -2398,8 +2398,11 @@ function openLocalSetup(type) {
     mb.querySelectorAll('[data-n]').forEach((b) => { b.onclick = () => { readNames(); n = Number(b.dataset.n); haptic(); draw(); }; });
     const readNames = () => mb.querySelectorAll('input[data-i]').forEach((inp) => { names[Number(inp.dataset.i)] = inp.value; });
     mb.querySelectorAll('.lp-piece').forEach((b) => { b.onclick = () => { const i = Number(b.dataset.i); const keys = Object.keys(PIECES); pieces[i] = keys[(keys.indexOf(pieces[i]) + 1) % keys.length]; b.innerHTML = pieceIcon(pieces[i], LUDO_COLORS[i].fill); b.setAttribute('aria-label', 'Piece: ' + PIECES[pieces[i]].name); haptic(6); }; });
-    $('lp-start').onclick = () => {
-      readNames(); hideModal(); haptic(12);
+    $('lp-start').onclick = async () => {
+      readNames();
+      const cur = localGames.s;
+      if (cur && cur.status === 'playing' && !localGames.isOver(cur) && !await confirmSheet('Start a new game?', `Your unfinished ${GAMES[cur.type]?.name || 'pass & play'} game on this phone will be lost.`, 'Start new')) return;
+      hideModal(); haptic(12);
       localStorage.setItem(LOCAL_SETUP_KEY, JSON.stringify({ n, names, pieces }));
       const s = localGames.start(type, { names: names.slice(0, n), pieces: pieces.slice(0, n) });
       openGame(s.id);
@@ -2421,7 +2424,7 @@ function renderPlay() {
 function openNtfySetup() {
   const topic = app.state.profile.ntfy || '';
   showModal(`<div class="lp"><div class="lp-ico">🔔</div><h2>Alerts when Chatly is closed</h2><p class="muted">iPhone only lets App Store apps receive push. The free <b>ntfy</b> app can, so Chatly pings your private ntfy channel when a friend messages or calls you — even when Chatly is closed. ntfy only ever sees "ping", never your messages.</p>
-    ${topic ? `<ol class="steps"><li>Install ntfy: <a href="https://apps.apple.com/app/ntfy/id1625396347" target="_blank" rel="noopener">iPhone</a> · <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">Android</a></li><li>In ntfy tap <b>+</b> → Subscribe to topic → paste <code id="ntfy-topic">${topic}</code> <button class="btn small" id="ntfy-copy">Copy</button></li><li>Allow notifications for ntfy. Friends' pings now reach you.</li></ol><div class="lp-actions"><button class="btn" id="ntfy-test">Send me a test alert</button><button class="btn ghost" id="ntfy-off">Turn off</button></div>` : `<button class="btn primary" id="ntfy-on">Turn on</button>`}</div>`);
+    ${topic ? `<ol class="steps"><li>Install ntfy: <a href="https://apps.apple.com/app/ntfy/id1625396347" target="_blank" rel="noopener">iPhone</a> · <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">Android</a></li><li>In ntfy tap <b>+</b> → Subscribe to topic → paste <code id="ntfy-topic">${esc(topic)}</code> <button class="btn small" id="ntfy-copy">Copy</button></li><li>Allow notifications for ntfy. Friends' pings now reach you.</li></ol><div class="lp-actions"><button class="btn" id="ntfy-test">Send me a test alert</button><button class="btn ghost" id="ntfy-off">Turn off</button></div>` : `<button class="btn primary" id="ntfy-on">Turn on</button>`}</div>`);
   const on = $('ntfy-on'); if (on) on.onclick = async () => { const t = 'chatly-' + Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join(''); await app.setNtfy(t); haptic(); openNtfySetup(); refreshNtfyRow(); };
   const off = $('ntfy-off'); if (off) off.onclick = async () => { await app.setNtfy(''); toast('Closed-app alerts off'); openNtfySetup(); refreshNtfyRow(); };
   const cp = $('ntfy-copy'); if (cp) cp.onclick = () => { navigator.clipboard?.writeText(topic).then(() => toast('Topic copied')).catch(() => toast(topic)); };
@@ -2610,9 +2613,9 @@ function renderGame() {
   try { gameView.update(s); } catch (e) { console.error(e); body.innerHTML = `<div class="game-status">Could not draw the game (${esc(e.message)})</div>`; }
   let ov = body.querySelector('.g-result');
   if (over) {
-    const st = s.state, w = st.winner, won = w === my, draw = w === null || w === undefined || w < 0, sw = G_().seriesWinner(s), seriesOver = sw >= 0;
+    const st = s.state, w = st.winner, won = w === my, draw = w === null || w === undefined || w < 0, cheer = !draw && (won || s.local), sw = G_().seriesWinner(s), seriesOver = sw >= 0;
     if (!ov) { ov = document.createElement('div'); ov.className = 'g-result'; body.appendChild(ov); }
-    ov.innerHTML = `<div class="g-result-card ${draw ? 'draw' : won ? 'won' : 'lost'}"><div class="g-trophy">${draw ? '🤝' : won ? '🏆' : '😮'}</div><h3>${seriesOver ? (sw === my ? 'You win the match!' : esc(pname(s, s.players[sw])) + ' wins the match') : draw ? "It's a draw" : won ? 'You win!' : esc(pname(s, s.players[w])) + ' wins'}</h3>
+    ov.innerHTML = `<div class="g-result-card ${draw ? 'draw' : cheer ? 'won' : 'lost'}"><div class="g-trophy">${draw ? '🤝' : cheer ? '🏆' : '😮'}</div><h3>${seriesOver ? (sw === my ? 'You win the match!' : esc(pname(s, s.players[sw])) + ' wins the match') : draw ? "It's a draw" : won ? 'You win!' : esc(pname(s, s.players[w])) + ' wins'}</h3>
       ${st.score ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(pname(s, p))} <b>${st.score[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : st.scores ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(pname(s, p))} <b>${st.scores[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : ''}
       ${!draw && (G_().stats(s.chatId)[s.players[w]]?.streak || 0) >= 2 ? `<div class="g-streak">🔥 ${G_().stats(s.chatId)[s.players[w]].streak} wins in a row</div>` : ''}
       <div class="g-result-actions"><button class="btn ghost" id="g-result-look">Look at board</button><button class="btn primary" data-game-act="again">${seriesOver ? 'New match' : 'Rematch'}</button></div>
@@ -2621,7 +2624,7 @@ function renderGame() {
     ov.querySelector('#g-result-look').onclick = () => { ov.classList.add('peek'); setTimeout(() => ov && ov.classList.remove('peek'), 4000); };
     ov.querySelector('#g-result-leave').onclick = leaveGame;
     const doneKey = s.id + ':' + (st.round || 1);
-    if (lastDone !== doneKey) { lastDone = doneKey; if (won) { confetti(body, 60); fx(900, 0.2, 0, 0.06, 'sine'); fx(1200, 0.2, 0.15, 0.06, 'sine'); fx(1600, 0.35, 0.3, 0.06, 'sine'); haptic([30, 60, 30, 60, 60]); } else if (!draw) { fx(400, 0.3, 0, 0.05, 'triangle'); fx(300, 0.4, 0.2, 0.05, 'triangle'); } }
+    if (lastDone !== doneKey) { lastDone = doneKey; if (cheer) { confetti(body, 60); fx(900, 0.2, 0, 0.06, 'sine'); fx(1200, 0.2, 0.15, 0.06, 'sine'); fx(1600, 0.35, 0.3, 0.06, 'sine'); haptic([30, 60, 30, 60, 60]); } else if (!draw) { fx(400, 0.3, 0, 0.05, 'triangle'); fx(300, 0.4, 0.2, 0.05, 'triangle'); } }
   } else if (ov) ov.remove();
 }
 function confetti(host, count = 36) {
