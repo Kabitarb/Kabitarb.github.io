@@ -82,13 +82,18 @@ export function view(ctx) {
     mount(host) { el = host; },
     update(s) {
       const st = s.state, over = engine.over(st), my = ctx.my, myTurn = st.turn === my && !over;
-      const pieces = s.players.map((p, i) => (s.pieces && s.pieces[p]) || 'coin');
+      const pieces = s.players.map((p, i) => (s.pieces && s.pieces[p]) || 'pin');
       const fresh = st.last && seen !== -1 && seen !== st.seq; const prevSeq = seen; seen = st.seq;
-      const players = s.players.map((p, i) => `<span class="snl-player ${st.turn === i && !over ? 'active' : ''}" style="--c:${LUDO_COLORS[i % 4].fill}"><i></i>${esc(ctx.nameOf(p))} <b>${st.pos[i]}</b></span>`).join('');
       let status = over ? `🏆 ${st.winner === my ? 'You won!' : esc(ctx.nameOf(s.players[st.winner])) + ' won'}` : `${st.turn === my ? 'Your' : esc(ctx.nameOf(s.players[st.turn])) + "'s"} turn — ${myTurn ? 'roll the dice' : 'rolling…'}`;
       if (!over && st.last && st.last.pi !== undefined && fresh) { const L = st.last; const who = L.pi === my ? 'You' : esc(ctx.nameOf(s.players[L.pi])); status = `${who} rolled ${L.d}${L.snake ? ` — 🐍 down to ${L.to}!` : L.ladder ? ` — 🪜 up to ${L.to}!` : L.stuck ? ' — needs an exact roll' : ''}`; }
       const dice = `<button class="dice ${myTurn ? 'can' : ''}" data-game-act="roll" data-d="${st.dice || 0}" ${myTurn ? '' : 'disabled'} aria-label="Dice"><span class="cube"><i class="f1"></i><i class="f2"></i><i class="f3"></i><i class="f4"></i><i class="f5"></i><i class="f6"></i></span></button>`;
-      el.innerHTML = `<div class="snl-players">${players}</div>${boardSvg(st, my, pieces, s.players)}<div class="ludo-bar snl-bar" style="--turn:${LUDO_COLORS[st.turn % 4].fill}">${dice}<div class="game-status">${status}</div></div>`;
+      const chips = ['', '', '', ''];
+      s.players.forEach((p, i) => {
+        const c = LUDO_COLORS[i % 4].fill; const q = [0, 1, 3, 2][i]; const name = ctx.nameOf(p); const isTurn = st.turn === i && !over;
+        const av = ctx.avatar ? ctx.avatar(p, 'sm') : `<span class="avatar sm">${esc((name || '?').trim().charAt(0).toUpperCase())}</span>`;
+        chips[q] = `<div class="lchip q${q} ${isTurn ? 'turn' : ''} ${i === my ? 'me' : ''}" style="--c:${c}"><span class="lav">${av}</span><span class="lrib">${esc(name)}${st.winner === i ? ' 🏁' : ''}</span></div>`;
+      });
+      el.innerHTML = `<div class="ludo-stage snl-stage" style="--turn:${LUDO_COLORS[st.turn % 4].fill}"><div class="ludo-row top">${chips[0] || '<span></span>'}${dice}${chips[1] || '<span></span>'}</div>${boardSvg(st, my, pieces, s.players)}<div class="ludo-row bottom">${chips[3] || '<span></span>'}<span></span>${chips[2] || '<span></span>'}</div><div class="game-status ludo-status">${status}</div></div>`;
       const roll = el.querySelector('[data-game-act=roll]'); if (roll) roll.onclick = () => { ctx.haptic(15); roll.disabled = true; ctx.move({ a: 'roll', d: 1 + Math.floor(Math.random() * 6) }); };
       if (fresh && st.last && !ctx.reduced) {
         const L = st.last, tok = el.querySelector(`.tok[data-pi="${L.pi}"]`), diceEl = el.querySelector('.dice'); if (!tok) return;
