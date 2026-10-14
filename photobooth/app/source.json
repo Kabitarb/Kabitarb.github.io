@@ -1,0 +1,26 @@
+{
+  "name": "Dalkom Booth",
+  "identifier": "com.kabitarb.photobooth.source",
+  "sourceURL": "https://kabitarb.github.io/photobooth/app/source.json",
+  "apps": [
+    {
+      "name": "Dalkom Booth 달콤부스",
+      "bundleIdentifier": "com.kabitarb.photobooth",
+      "developerName": "Kabitarb",
+      "version": "1.0",
+      "versionDate": "2026-03-24",
+      "versionDescription": "First release",
+      "downloadURL": "https://kabitarb.github.io/photobooth/app/DalkomBooth-1.0.ipa",
+      "localizedDescription": "Cute Korean photo booth — snap, frame, save.",
+      "iconURL": "https://kabitarb.github.io/photobooth/icons/icon-512.png",
+      "tintColor": "FF8FB1",
+      "size": 1000000,
+      "minOSVersion": "16.0",
+      "permissions": [
+        { "type": "photos", "usageDescription": "Save your photo strips to Photos." },
+        { "type": "camera", "usageDescription": "Take booth photos." },
+        { "type": "microphone", "usageDescription": "Record live clips." }
+      ]
+    }
+  ]
+}
