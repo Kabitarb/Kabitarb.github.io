@@ -212,7 +212,7 @@ function drawSticker(ctx, st, W, H) {
 }
 
 export async function ensureFonts(project, theme) {
-  const fams = [project.text.font || theme.font || 'Great Vibes', 'Jua', 'Quicksand'];
+  const fams = [project.text.font || theme.font || 'Great Vibes', 'Jua', 'Quicksand', 'Gaegu', 'Caveat'];
   await Promise.all(fams.map(f => document.fonts.load(`40px "${f}"`).catch(() => {})));
 }
 
@@ -222,7 +222,8 @@ export function render(ctx, project, { scale = 1, time = 0, preview = false } = 
   const size = layoutSize(layout);
   const filter = getFilter(project.filter.id);
   const intensity = (project.filter.intensity ?? 100) / 100;
-  const filterEng = (src, w, h) => applyFilter(src, w, h, filter, intensity);
+  const beauty = (project.beauty || 0) / 100;
+  const filterEng = (src, w, h) => applyFilter(src, w, h, filter, intensity, beauty);
 
   ctx.save();
   ctx.scale(scale, scale);
