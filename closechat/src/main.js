@@ -11,6 +11,7 @@ import { GroupCallManager } from './groupcall.js';
 import { REACTIONS } from './games/manager.js';
 import { PACKS, stickerIds, stickerSvg, animIds, animOf, animHtml } from './stickers.js';
 import { GameManager, GAMES, VIEWS, GAME_ORDER } from './games.js';
+import { ARCADE, ARCADE_ORDER, bestScore, recordScore } from './arcade.js';
 import { ShareManager } from './share.js';
 import { WatchManager, parseMedia, MEDIA_RE } from './watch.js';
 import { TV_CHANNELS, TV_CATS, tvUrl, tvHue } from './tv.js';
@@ -2056,10 +2057,12 @@ async function openGames(id) {
   const active = games.forChat(id);
   showModal(`<h3>Games</h3><div class="menu gpick">
     ${active.map((s) => `<button class="gactive" data-mi="g:${s.id}"><span class="gicon">${GAMES[s.type].icon}</span><b>${s.status === 'lobby' ? 'Join' : 'Open'} ${esc(GAMES[s.type].name)}</b><small>${s.players.length} player${s.players.length === 1 ? '' : 's'} · ${s.status === 'lobby' ? 'in lobby' : 'playing'}</small></button>`).join('')}
-    ${GAME_ORDER.map((t, i) => `<button class="gtile" data-mi="${t}" style="--gc:${GAMES[t].color};--i:${i}"><span class="gicon">${GAMES[t].icon}</span>${GAMES[t].isNew ? '<em class="gnew">NEW</em>' : ''}<b>${esc(GAMES[t].name)}</b><small>${esc(GAMES[t].blurb)}</small></button>`).join('')}</div>${leaderboardHtml(id)}`);
+    ${GAME_ORDER.map((t, i) => `<button class="gtile" data-mi="${t}" style="--gc:${GAMES[t].color};--i:${i}"><span class="gicon">${GAMES[t].icon}</span>${GAMES[t].isNew ? '<em class="gnew">NEW</em>' : ''}<b>${esc(GAMES[t].name)}</b><small>${esc(GAMES[t].blurb)}</small></button>`).join('')}<h4 class="gsec">Arcade <span>solo · share your score</span></h4>
+    ${ARCADE_ORDER.map((t, i) => `<button class="gtile arc" data-mi="a:${t}" style="--gc:${ARCADE[t].color};--i:${GAME_ORDER.length + i}"><span class="gicon">${ARCADE[t].icon}</span>${bestScore(t) ? `<em class="gbest">Best ${bestScore(t)}</em>` : '<em class="gnew">NEW</em>'}<b>${esc(ARCADE[t].name)}</b><small>${esc(ARCADE[t].blurb)}</small></button>`).join('')}</div>${leaderboardHtml(id)}`);
   $('modal-body').querySelectorAll('[data-mi]').forEach((b) => { b.onclick = () => {
     const act = b.dataset.mi; hideModal(); haptic();
     if (act.startsWith('g:')) openGame(act.slice(2));
+    else if (act.startsWith('a:')) openArcade(act.slice(2), id);
     else { try { const s = games.invite(id, act); openGame(s.id); } catch (e) { toast(e.message, 'error'); } }
   }; });
 }
@@ -2364,6 +2367,7 @@ function renderGameFoot(s) {
 let gameMini = false;
 function openGame(id) {
   const s = games.get(id); if (!s) return;
+  if (arcadeOpen) closeGamePanel();
   openGameId = id; gameMini = false;
   if (s.status === 'lobby' && !s.players.includes(app.pk)) { try { games.join(id); } catch (e) { toast(e.message, 'error'); } }
   if (calls && calls.state !== 'idle' && !callMini) setCallMini(true);
@@ -2371,7 +2375,7 @@ function openGame(id) {
   $('game').classList.remove('hidden');
   renderGame();
 }
-function closeGamePanel() { clearInterval(gameTimerIv); dropGameView(); openGameId = null; gameMini = false; $('game').classList.add('hidden'); $('game').classList.remove('full', 'mini', 'turn'); }
+function closeGamePanel() { clearInterval(gameTimerIv); dropGameView(); openGameId = null; arcadeOpen = null; gameMini = false; $('game').classList.add('hidden'); $('game').classList.remove('full', 'mini', 'turn', 'arcade', 'idle'); $('game-body').innerHTML = ''; }
 function setGameMini(on) { gameMini = on; renderGame(); haptic(); }
 $('game-hide').onclick = () => setGameMini(true);
 // Fullscreen HUD: the header pill dims after 3 s without input; a swipe down from the top band minimizes.
@@ -2383,6 +2387,7 @@ $('game').addEventListener('pointerup', () => { gameSwipe = null; }, { passive: 
 $('game').addEventListener('keydown', gameActive);
 $('game-mini-bar').onclick = (e) => { if (!e.target.closest('#game-mini-leave')) setGameMini(false); };
 async function leaveGame() {
+  if (arcadeOpen) { closeGamePanel(); return; }
   const s = games.get(openGameId); if (!s) return;
   const finished = s.status === 'done' || (games.isOver(s) && !(GAMES[s.type].series > 1));
   if (finished || await confirmSheet('Leave game?', 'The game ends for everyone.', 'Leave')) { if (s.status !== 'done') games.quit(s.id); if (openGameId === s.id) closeGamePanel(); }
@@ -2394,7 +2399,41 @@ function dropGameView() { if (gameView) { try { gameView.unmount(); } catch {} }
 function gameCtx(s) {
   return { my: games.myIndex(s), pk: app.pk, nameOf: (p) => (p === app.pk ? 'You' : app.nameOf(p)), avatar: avatarHtml, move: (mv) => games.move(s.id, mv), haptic, fx, confetti, toast, reduced: reducedMotion() };
 }
+// Arcade (solo open-source games in a sandboxed iframe) shares the fullscreen shell, mini bar and HUD pill.
+let arcadeOpen = null;
+function openArcade(aid, chatId) {
+  if (!ARCADE[aid]) return;
+  if (openGameId) closeGamePanel();
+  arcadeOpen = { id: aid, chatId, score: null }; gameMini = false;
+  if (calls && calls.state !== 'idle' && !callMini) setCallMini(true);
+  $('game').classList.remove('hidden'); renderArcade(); haptic();
+}
+function renderArcade() {
+  const a = arcadeOpen; if (!a) return; const A = ARCADE[a.id]; const panel = $('game'), body = $('game-body');
+  $('game-title').textContent = `${A.icon} ${A.name}`; $('game-quit').textContent = 'Close'; $('game-mini-leave').textContent = 'Close';
+  $('game-mini-icon').textContent = A.icon; $('game-mini-title').textContent = A.name; $('game-mini-sub').textContent = a.score !== null ? `Score ${a.score} · tap to return` : 'Playing · tap to return';
+  panel.dataset.game = 'arcade:' + a.id; panel.classList.add('arcade'); panel.classList.toggle('mini', gameMini); panel.classList.toggle('full', !gameMini); panel.classList.remove('turn');
+  if (!gameMini) gameActive();
+  if (!body.querySelector('.arcade')) {
+    body.innerHTML = `<div class="arcade"><iframe id="arcade-frame" title="${esc(A.name)}" src="arcade/${a.id}/index.html" sandbox="allow-scripts allow-same-origin" allow="autoplay" loading="eager"></iframe>
+      <div class="arcade-over hidden" id="arcade-over"></div></div>`;
+  }
+}
+window.addEventListener('message', (e) => {
+  const d = e.data; if (!arcadeOpen || !d || d.chatlyArcade !== arcadeOpen.id) return;
+  if (d.type !== 'over') return;
+  const A = ARCADE[arcadeOpen.id], score = Math.max(0, Math.round(Number(d.score) || 0)); const r = recordScore(arcadeOpen.id, score); arcadeOpen.score = score;
+  const ov = $('arcade-over'); if (!ov) return;
+  ov.innerHTML = `<div class="arcade-card"><span class="arcade-ic">${A.icon}</span><h3>${r.newBest ? 'New best!' : 'Game over'}</h3><div class="arcade-score">${score.toLocaleString()}</div><div class="muted">${esc(A.name)} · best ${r.best.toLocaleString()}</div>
+    <div class="arcade-btns"><button class="btn primary" id="arcade-share">Share score</button><button class="btn" id="arcade-again">Play again</button></div>
+    <small class="tiny muted">Open source: ${esc(A.license)}</small></div>`;
+  ov.classList.remove('hidden'); haptic(20); fx(880, 0.12, 0, 0.08); fx(1320, 0.14, 0.12, 0.08);
+  $('arcade-share').onclick = async () => { const chat = arcadeOpen.chatId; if (!chat) return; try { await app.sendMessage(chat, { text: `${A.icon} ${A.name}: ${score.toLocaleString()} pts${r.newBest ? ' · new personal best' : ''} — beat me? (Games → Arcade)` }); toast('Score shared'); } catch (err) { toast(err.message, 'error'); } ov.classList.add('hidden'); };
+  $('arcade-again').onclick = () => { ov.classList.add('hidden'); const f = $('arcade-frame'); if (f) f.focus(); };
+  if (gameMini) renderArcade();
+});
 function renderGame() {
+  if (arcadeOpen) { renderArcade(); return; }
   const s = games.get(openGameId); if (!s) { closeGamePanel(); return; }
   const G = GAMES[s.type];
   const panel = $('game');
