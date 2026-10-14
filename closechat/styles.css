@@ -489,7 +489,7 @@ html[data-theme="amoled"] .messages { background: #000; }
 .game-status { font-weight: 600; }
 .ttt-cell { background: var(--bg2); border: 1px solid var(--line); }
 .ttt-cell.can:hover { background: var(--bg3); border-color: var(--accent); }
-.ttt-cell.p1 { color: var(--accent-2); filter: hue-rotate(140deg); }
+.ttt-cell.p1 { color: var(--accent-2); }
 .ttt-cell.win { background: linear-gradient(135deg, var(--success), #16a34a); border-color: transparent; }
 .ludo { border-radius: 16px; box-shadow: var(--shadow); }
 .dice { border-radius: 16px; border: 1px solid var(--line); background: var(--bg2); }
