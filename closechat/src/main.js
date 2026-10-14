@@ -7,6 +7,8 @@ import { resolveLogin, usernameTaken, setPassword, checkPassword, republishKeyst
 import { Store, settings, session } from './store.js';
 import { App, isGroupId, gidOf, profileFp, EXPIRE_OPTIONS } from './app.js';
 import { CallManager, Tones } from './rtc.js';
+import { GroupCallManager } from './groupcall.js';
+import { REACTIONS } from './games/manager.js';
 import { PACKS, stickerIds, stickerSvg, animIds, animOf, animHtml } from './stickers.js';
 import { GameManager, GAMES, VIEWS, GAME_ORDER } from './games.js';
 import { ShareManager } from './share.js';
@@ -427,16 +429,16 @@ async function startApp(sk, newName, username) {
     c.title = `${n}/${total} relays connected`;
   });
   app = new App(sk, store, transport);
-  window.__chatly = app; window.__games = () => games; // diagnostics / tests
+  window.__chatly = app; window.__games = () => games; window.__gcalls = () => gcalls; // diagnostics / tests
   applyKeepAlive();
   checkShellUpdate();
   accountSk = sk;
   app.sharePresence = s.presence !== false;
-  calls = new CallManager(app);
+  calls = new CallManager(app); gcalls = new GroupCallManager(app); app.calls = calls;
   games = new GameManager(app);
   watch = new WatchManager(app);
   share = new ShareManager(app);
-  wireApp(); wireCalls(); wireGames(); wireWatch(); wireShare();
+  wireApp(); wireCalls(); wireGroupCalls(); wireGames(); wireWatch(); wireShare();
   $('auth').classList.add('hidden'); $('main').classList.remove('hidden');
   window.dispatchEvent(new Event('chatly:ready'));
   $('login-form').reset(); $('signup-form').reset();
@@ -625,8 +627,9 @@ function renderChatList() {
     const t = typingState[id];
     if (t) preview = `<i>${isGroupId(id) ? esc(app.nameOf(t.pk)) + ' is ' : ''}typing…</i>`; else preview = esc(preview);
     const unread = chat.unread || (chat.markUnread ? '•' : 0);
+    const ring = unread ? 'new' : !isGroupId(id) && app.isOnline(id) ? 'on' : '';
     return `<div class="item ${unread ? 'unread-item' : ''} ${chat.mute ? 'muted' : ''} ${app.openChat === id ? 'active' : ''}" data-id="${id}"><div class="inner">
-      ${avatarHtml(id)}
+      <span class="av-ring ${ring}">${avatarHtml(id)}</span>
       <div class="body"><div class="top"><span class="name">${esc(app.nameOf(id))}<span class="flags">${chat.pin ? '📌' : ''}${chat.mute ? '🔕' : ''}${chat.expire ? '⏱' : ''}</span></span>${pending ? '<span class="pend">Request sent</span>' : `<span class="time">${fmtListTime(chat.lastTs)}</span>`}</div>
       <div class="preview"><span>${preview}</span>${unread ? `<span class="unread">${unread}</span>` : ''}</div></div></div>
       <div class="acts"><button class="a-pin" data-act="pin"><span>📌</span>${chat.pin ? 'Unpin' : 'Pin'}</button><button class="a-mute" data-act="mute"><span>${chat.mute ? '🔔' : '🔕'}</span>${chat.mute ? 'Unmute' : 'Mute'}</button><button class="a-arch" data-act="arch"><span>🗄️</span>${chat.arch ? 'Unarchive' : 'Archive'}</button><button class="a-unread" data-act="unread"><span>${chat.unread || chat.markUnread ? '✉️' : '🔵'}</span>${chat.unread || chat.markUnread ? 'Read' : 'Unread'}</button></div></div>`;
@@ -746,6 +749,9 @@ function renderFriends() {
   });
 }
 
+function groupCallLabel(c) {
+  return `Group ${c.video ? 'video' : 'voice'} call${c.missed ? ' · missed' : c.reason === 'declined' ? ' · declined' : c.dir === 'out' ? ' · you started it' : c.by ? ' · by ' + app.nameOf(c.by) : ''}${c.dur ? ' · ' + (c.dur < 60 ? c.dur + ' s' : Math.round(c.dur / 60) + ' min') : ''}`;
+}
 function renderCalls() {
   const el = $('call-list');
   const log = app.state.calls;
@@ -753,7 +759,7 @@ function renderCalls() {
   el.innerHTML = log.map((c, i) => `<div class="item" data-i="${i}">
     ${avatarHtml(c.peer)}
     <div class="body"><div class="top"><span class="name" style="${c.missed ? 'color:var(--danger)' : ''}">${esc(app.nameOf(c.peer))}</span><span class="time">${fmtListTime(c.ts)}</span></div>
-    <div class="preview"><span>${callLabel(c)}</span></div></div>
+    <div class="preview"><span>${c.group ? groupCallLabel(c) : callLabel(c)}</span></div></div>
     <button class="icon-btn call-icon ${c.missed ? 'missed' : ''}" title="Call back">${c.video ? VIDEO_SVG : PHONE_SVG}</button></div>`).join('');
   el.querySelectorAll('.item').forEach((i) => {
     const c = log[Number(i.dataset.i)];
@@ -1122,13 +1128,15 @@ async function squareAvatar(file) {
 function loadImage(file) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = URL.createObjectURL(file); }); }
 
 /* ---------------- tabs ---------------- */
+let prevTab = 'chats';
 document.querySelectorAll('.tabbar button').forEach((b) => {
   b.onclick = () => {
     if (currentTab !== b.dataset.tab) { b.classList.remove('pop'); void b.offsetWidth; b.classList.add('pop'); haptic(6); }
     currentTab = b.dataset.tab;
     document.querySelector('.side-body').scrollTop = 0; $('side').classList.remove('compact');
     document.querySelectorAll('.tabbar button').forEach((x) => x.classList.toggle('active', x === b));
-    document.querySelectorAll('.tab-pane').forEach((p) => p.classList.toggle('hidden', p.dataset.pane !== currentTab));
+    const order = ['chats', 'friends', 'calls', 'requests', 'settings']; const dir = order.indexOf(currentTab) >= order.indexOf(prevTab) ? 'enter-r' : 'enter-l'; prevTab = currentTab;
+    document.querySelectorAll('.tab-pane').forEach((p) => { const show = p.dataset.pane === currentTab; p.classList.toggle('hidden', !show); p.classList.remove('enter-r', 'enter-l'); if (show && !reducedMotion()) { void p.offsetWidth; p.classList.add(dir); } });
     $('side-title').textContent = { chats: 'Chats', friends: 'Friends', calls: 'Calls', requests: 'Requests', settings: 'Settings' }[currentTab];
     $('fab-new').classList.toggle('hidden', currentTab !== 'chats');
   };
@@ -1146,6 +1154,7 @@ let renderedIds = new Set();
 let renderedChat = null;
 let chatAnimTimer = null;
 function openChat(id) {
+  setTimeout(renderGcallBanner, 0);
   if (!id) return;
   if (app.openChat && app.openChat !== id) app.store.chat(app.openChat).draft = $('input').value;
   app.setOpenChat(id);
@@ -1263,8 +1272,9 @@ function renderChat(scrollToEnd = false) {
   $('pending-name').textContent = app.nameOf(id);
   $('composer').classList.toggle('hidden', !can);
   $('left-note').classList.toggle('hidden', !(group && !g));
-  $('audio-call-btn').classList.toggle('hidden', group || !can || pending);
-  $('video-call-btn').classList.toggle('hidden', group || !can || pending);
+  const noCall = group ? !(app.group(app.openChat)?.members.length > 1) : (!can || pending);
+  $('audio-call-btn').classList.toggle('hidden', noCall);
+  $('video-call-btn').classList.toggle('hidden', noCall);
   $('plus-btn').classList.toggle('hidden', !can || pending);
   updateTyping();
 
@@ -1608,9 +1618,18 @@ $('reply-cancel').onclick = () => { replyTo = null; renderReplyBar(); };
   }, { passive: false });
 })();
 
+function addMsgPreview(mid, tries = 0) {
+  const sheet = document.querySelector('#modal:not(.hidden) .sheet'); const src = document.querySelector(`.msg[data-id="${mid}"] .bubble`);
+  if (!sheet) { if (tries < 10) setTimeout(() => addMsgPreview(mid, tries + 1), 30); return; }
+  if (!src || sheet.querySelector('.mm-preview')) return;
+  const wrap = document.createElement('div'); wrap.className = 'mm-preview ' + (src.closest('.msg').classList.contains('out') ? 'out' : 'in');
+  const clone = src.cloneNode(true); clone.querySelectorAll('video, audio').forEach((v) => { v.controls = false; v.autoplay = false; }); wrap.appendChild(clone);
+  sheet.insertBefore(wrap, sheet.firstChild);
+}
 async function messageMenu(mid) {
   const id = app.openChat; const chat = app.store.chat(id);
   const m = chat.messages.find((x) => x.id === mid); if (!m) return;
+  haptic(8); setTimeout(() => addMsgPreview(mid), 0);
   const items = [{ id: 'reply', label: 'Reply' }];
   if (m.kind === 'text' && !m.deleted) items.push({ id: 'copy', label: 'Copy text' });
   if (!m.deleted && ['text', 'image', 'sticker', 'video', 'audio'].includes(m.kind)) items.push({ id: 'forward', label: 'Forward' });
@@ -2037,12 +2056,18 @@ async function openGames(id) {
   const active = games.forChat(id);
   showModal(`<h3>Games</h3><div class="menu gpick">
     ${active.map((s) => `<button class="gactive" data-mi="g:${s.id}"><span class="gicon">${GAMES[s.type].icon}</span><b>${s.status === 'lobby' ? 'Join' : 'Open'} ${esc(GAMES[s.type].name)}</b><small>${s.players.length} player${s.players.length === 1 ? '' : 's'} · ${s.status === 'lobby' ? 'in lobby' : 'playing'}</small></button>`).join('')}
-    ${GAME_ORDER.map((t) => `<button class="gtile" data-mi="${t}" style="--gc:${GAMES[t].color}"><span class="gicon">${GAMES[t].icon}</span><b>${esc(GAMES[t].name)}</b><small>${esc(GAMES[t].blurb)}</small></button>`).join('')}</div>`);
+    ${GAME_ORDER.map((t, i) => `<button class="gtile" data-mi="${t}" style="--gc:${GAMES[t].color};--i:${i}"><span class="gicon">${GAMES[t].icon}</span>${GAMES[t].isNew ? '<em class="gnew">NEW</em>' : ''}<b>${esc(GAMES[t].name)}</b><small>${esc(GAMES[t].blurb)}</small></button>`).join('')}</div>${leaderboardHtml(id)}`);
   $('modal-body').querySelectorAll('[data-mi]').forEach((b) => { b.onclick = () => {
     const act = b.dataset.mi; hideModal(); haptic();
     if (act.startsWith('g:')) openGame(act.slice(2));
     else { try { const s = games.invite(id, act); openGame(s.id); } catch (e) { toast(e.message, 'error'); } }
   }; });
+}
+
+function leaderboardHtml(chatId) {
+  const st = games.stats(chatId); const rows = Object.entries(st).filter(([, r]) => r.w + r.l + r.d > 0).sort((a, b) => b[1].w - a[1].w || a[1].l - b[1].l);
+  if (!rows.length) return '';
+  return `<div class="g-lb"><h4>Leaderboard</h4>${rows.map(([pk, r], i) => `<div class="g-lb-row ${pk === app.pk ? 'me' : ''}"><span class="g-lb-rank">${['🥇', '🥈', '🥉'][i] || i + 1}</span>${avatarHtml(pk, 'sm')}<span class="g-lb-name">${esc(pk === app.pk ? 'You' : app.nameOf(pk))}</span>${r.streak >= 2 ? `<span class="g-lb-streak">🔥 ${r.streak}</span>` : ''}<span class="g-lb-rec"><b>${r.w}</b>W · ${r.l}L${r.d ? ` · ${r.d}D` : ''}</span></div>`).join('')}</div>`;
 }
 
 /* ---------------- groups ---------------- */
@@ -2299,6 +2324,42 @@ function wireGames() {
     }
     scheduleRender();
   });
+  games.addEventListener('react', (e) => {
+    const { id, from, e: emo } = e.detail; const s = games.get(id); if (!s) return;
+    if (openGameId === id && !gameMini) { floatEmoji(emo, from === app.pk); if (from !== app.pk) { haptic(10); fx(emo === '⏰' ? 1200 : 700, 0.08, 0, 0.05, 'sine'); } }
+    else if (from !== app.pk) toast(`${app.nameOf(from)} ${emo} in ${GAMES[s.type].name}`);
+  });
+  games.addEventListener('undo-no', () => { toast('Undo declined'); });
+}
+function floatEmoji(emo, mine) {
+  const body = $('game-body'); const el = document.createElement('span'); el.className = 'g-float' + (mine ? ' mine' : '');
+  el.textContent = emo; el.style.left = `${(mine ? 70 : 20) + Math.random() * 12}%`; body.appendChild(el);
+  if (reducedMotion()) { setTimeout(() => el.remove(), 900); return; }
+  el.animate([{ transform: 'translateY(0) scale(.6)', opacity: 0 }, { transform: 'translateY(-40px) scale(1.3)', opacity: 1, offset: 0.2 }, { transform: 'translateY(-220px) scale(1)', opacity: 0 }], { duration: 1600, easing: 'cubic-bezier(.2,.7,.3,1)' }).onfinish = () => el.remove();
+}
+let gameTimerIv = 0, nudgedFor = '';
+function tickGameTimer() {
+  const s = games.get(openGameId); const t = document.getElementById('g-timer'); if (!s || !t) return;
+  const dl = games.turnDeadline(s); if (!dl) { t.classList.add('hidden'); return; }
+  const left = Math.max(0, Math.ceil((dl - Date.now()) / 1000)); const mine = games.isMyTurn(s);
+  t.classList.remove('hidden'); t.classList.toggle('low', left <= 10); t.classList.toggle('mine', mine);
+  t.innerHTML = left > 0 ? `<i></i>${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : mine ? '<i></i>Time\'s up — your move' : `<i></i><button class="link" id="g-nudge">Nudge ⏰</button>`;
+  const nb = document.getElementById('g-nudge'); if (nb) nb.onclick = () => { const k = s.id + ':' + s.seq; if (nudgedFor === k) { toast('Already nudged'); return; } nudgedFor = k; games.react(s.id, '⏰'); };
+}
+function renderGameFoot(s) {
+  const foot = document.getElementById('g-foot'); if (!foot) return;
+  const E = games.engine(s), myTurn = games.isMyTurn(s), over = games.isOver(s), G = GAMES[s.type];
+  const u = s.undoReq && s.undoReq.from !== app.pk ? s.undoReq : null;
+  foot.innerHTML = `${u ? `<div class="g-undo-ask"><span>${esc(app.nameOf(u.from))} asks to undo their last move</span><button class="btn small primary" id="g-undo-yes">Allow</button><button class="btn small ghost" id="g-undo-no">No</button></div>` : ''}
+    <div class="g-tools"><span class="g-timer hidden" id="g-timer"></span>
+    ${E.hint && !G.simul ? `<button class="chip ${myTurn && !over ? '' : 'dim'}" id="g-hint" ${myTurn && !over ? '' : 'disabled'} title="Suggest a move">💡 Hint</button>` : ''}
+    ${games.canUndo(s) && !over ? '<button class="chip" id="g-undo" title="Ask to take back your last move">↩ Undo</button>' : ''}
+    <span class="g-react">${REACTIONS.filter((e) => e !== '⏰').map((e) => `<button data-e="${e}" aria-label="React ${e}">${e}</button>`).join('')}</span></div>`;
+  const hb = document.getElementById('g-hint'); if (hb) hb.onclick = () => { haptic(); const h = games.hint(s.id); if (!h) toast('No hint available'); };
+  const ub = document.getElementById('g-undo'); if (ub) ub.onclick = () => { haptic(); if (games.requestUndo(s.id)) toast('Undo requested…'); };
+  if (u) { $('g-undo-yes').onclick = () => games.answerUndo(s.id, true); $('g-undo-no').onclick = () => games.answerUndo(s.id, false); }
+  foot.querySelectorAll('.g-react button').forEach((b) => { b.onclick = () => { haptic(8); games.react(s.id, b.dataset.e); }; });
+  tickGameTimer();
 }
 let gameMini = false;
 function openGame(id) {
@@ -2310,13 +2371,14 @@ function openGame(id) {
   $('game').classList.remove('hidden');
   renderGame();
 }
-function closeGamePanel() { dropGameView(); openGameId = null; gameMini = false; $('game').classList.add('hidden'); $('game').classList.remove('full', 'mini', 'turn'); }
+function closeGamePanel() { clearInterval(gameTimerIv); dropGameView(); openGameId = null; gameMini = false; $('game').classList.add('hidden'); $('game').classList.remove('full', 'mini', 'turn'); }
 function setGameMini(on) { gameMini = on; renderGame(); haptic(); }
 $('game-hide').onclick = () => setGameMini(true);
 $('game-mini-bar').onclick = (e) => { if (!e.target.closest('#game-mini-leave')) setGameMini(false); };
 async function leaveGame() {
   const s = games.get(openGameId); if (!s) return;
-  if (s.status === 'done' || await confirmSheet('Leave game?', 'The game ends for everyone.', 'Leave')) { if (s.status !== 'done') games.quit(s.id); if (openGameId === s.id) closeGamePanel(); }
+  const finished = s.status === 'done' || (games.isOver(s) && !(GAMES[s.type].series > 1));
+  if (finished || await confirmSheet('Leave game?', 'The game ends for everyone.', 'Leave')) { if (s.status !== 'done') games.quit(s.id); if (openGameId === s.id) closeGamePanel(); }
 }
 $('game-quit').onclick = leaveGame;
 $('game-mini-leave').onclick = (e) => { e.stopPropagation(); leaveGame(); };
@@ -2367,15 +2429,19 @@ function renderGame() {
   if (!gameView || gameViewFor !== key) {
     dropGameView();
     body.innerHTML = ''; const host = document.createElement('div'); host.className = 'g-view g-' + s.type; body.appendChild(host);
+    const foot = document.createElement('div'); foot.className = 'g-foot'; foot.id = 'g-foot'; body.appendChild(foot);
     gameView = VIEWS[s.type](gameCtx(s)); gameViewFor = key; gameView.mount(host);
   }
+  renderGameFoot(s);
+  clearInterval(gameTimerIv); gameTimerIv = setInterval(tickGameTimer, 1000);
   try { gameView.update(s); } catch (e) { console.error(e); body.innerHTML = `<div class="game-status">Could not draw the game (${esc(e.message)})</div>`; }
   let ov = body.querySelector('.g-result');
   if (over) {
     const st = s.state, w = st.winner, won = w === my, draw = w === null || w === undefined || w < 0, sw = games.seriesWinner(s), seriesOver = sw >= 0;
     if (!ov) { ov = document.createElement('div'); ov.className = 'g-result'; body.appendChild(ov); }
-    ov.innerHTML = `<div class="g-result-card"><div class="g-trophy">${draw ? '🤝' : won ? '🏆' : '😮'}</div><h3>${seriesOver ? (sw === my ? 'You win the match!' : esc(app.nameOf(s.players[sw])) + ' wins the match') : draw ? "It's a draw" : won ? 'You win!' : esc(app.nameOf(s.players[w])) + ' wins'}</h3>
-      ${st.score ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(p === app.pk ? 'You' : app.nameOf(p))} <b>${st.score[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : ''}
+    ov.innerHTML = `<div class="g-result-card ${draw ? 'draw' : won ? 'won' : 'lost'}"><div class="g-trophy">${draw ? '🤝' : won ? '🏆' : '😮'}</div><h3>${seriesOver ? (sw === my ? 'You win the match!' : esc(app.nameOf(s.players[sw])) + ' wins the match') : draw ? "It's a draw" : won ? 'You win!' : esc(app.nameOf(s.players[w])) + ' wins'}</h3>
+      ${st.score ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(p === app.pk ? 'You' : app.nameOf(p))} <b>${st.score[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : st.scores ? `<div class="g-series">${s.players.map((p, i) => `<span class="${i === my ? 'me' : ''}">${esc(p === app.pk ? 'You' : app.nameOf(p))} <b>${st.scores[i] || 0}</b></span>`).join('<i>–</i>')}</div>` : ''}
+      ${!draw && (games.stats(s.chatId)[s.players[w]]?.streak || 0) >= 2 ? `<div class="g-streak">🔥 ${games.stats(s.chatId)[s.players[w]].streak} wins in a row</div>` : ''}
       <div class="g-result-actions"><button class="btn ghost" id="g-result-look">Look at board</button><button class="btn primary" data-game-act="again">${seriesOver ? 'New match' : 'Rematch'}</button></div>
       <button class="link" id="g-result-leave">Leave game</button></div>`;
     ov.querySelector('[data-game-act=again]').onclick = () => { haptic(); if (seriesOver) { games.quit(s.id); try { openGame(games.invite(s.chatId, s.type).id); } catch (e) { toast(e.message, 'error'); } } else games.move(s.id, { a: 'again' }); };
@@ -2477,7 +2543,8 @@ function wireShare() {
 }
 
 /* ---------------- calls ---------------- */
-let callTimer = null, ringVib = null, lastCallState = '', callMini = false, lastCallInfo = null;
+let callTimer = null, ringVib = null, lastCallState = '', callMini = false, lastCallInfo = null, gcalls = null;
+const ac = () => (gcalls && gcalls.state !== 'idle' ? gcalls : calls);
 function setCallMini(on) {
   callMini = on;
   const ov = $('call');
@@ -2491,7 +2558,7 @@ $('call-min-btn').onclick = (e) => { e.stopPropagation(); setCallMini(true); };
 $('mini-hang').onclick = (e) => { e.stopPropagation(); calls.hangup(); };
 $('call').addEventListener('click', (e) => { if (callMini && !e.target.closest('#mini-hang')) setCallMini(false); });
 function startCall(pk, video) {
-  if (isGroupId(pk)) { toast('Group calls are not supported yet'); return; }
+  if (isGroupId(pk)) { if (!navigator.mediaDevices || !window.RTCPeerConnection) { toast('Calls are not supported in this browser', 'error'); return; } if (calls.state !== 'idle' || gcalls.state !== 'idle') { toast('Already in a call'); return; } tones.ensure(); gcalls.start(pk, video).catch((e) => toast(e.message, 'error')); return; }
   if (!app.isFriend(pk)) { toast('Accept the friend request first'); return; }
   if (!navigator.mediaDevices || !window.RTCPeerConnection) { toast('Calls are not supported in this browser', 'error'); return; }
   tones.ensure();
@@ -2499,12 +2566,12 @@ function startCall(pk, video) {
 }
 $('audio-call-btn').onclick = () => startCall(app.openChat, false);
 $('video-call-btn').onclick = () => startCall(app.openChat, true);
-$('hangup-btn').onclick = () => calls.hangup();
-$('decline-btn').onclick = () => calls.decline();
-$('accept-btn').onclick = () => { tones.ensure(); calls.accept(); };
-$('mute-btn').onclick = () => calls.toggleMute();
-$('cam-btn').onclick = () => calls.toggleCamera();
-$('flip-btn').onclick = () => calls.switchCamera();
+$('hangup-btn').onclick = () => ac().hangup();
+$('decline-btn').onclick = () => ac().decline();
+$('accept-btn').onclick = () => { tones.ensure(); ac().accept(); };
+$('mute-btn').onclick = () => ac().toggleMute();
+$('cam-btn').onclick = () => ac().toggleCamera();
+$('flip-btn').onclick = () => ac().switchCamera();
 $('share-btn').onclick = () => calls.shareScreen();
 $('call-game-btn').onclick = (e) => { e.stopPropagation(); const peer = calls.peer; if (!peer) return; setCallMini(true); openGames(peer); };
 let speakerOn = false;
@@ -2642,6 +2709,8 @@ function wireCalls() {
 
 function renderCall(info) {
   const ov = $('call');
+  if (info.group) return renderGroupCall(info);
+  if (gcalls && gcalls.state !== 'idle') { if (info.state === 'incoming') calls.decline(); return; }
   if (info.state === 'idle') {
     lastCallState = 'idle'; lastCallInfo = null;
     if (callMini) setCallMini(false);
@@ -2699,6 +2768,105 @@ function renderCall(info) {
     upd(); callTimer = setInterval(upd, 1000);
   }
   lastCallState = info.state;
+}
+
+/* ---------------- group calls ---------------- */
+const MUTED_SVG = '<svg viewBox="0 0 24 24"><path d="M19 11h-1.7a5.3 5.3 0 0 1-.5 2.2l1.3 1.3A7 7 0 0 0 19 11ZM4.3 3 3 4.3l6 6V11a3 3 0 0 0 4.6 2.5l1.4 1.4A5 5 0 0 1 7 11H5.3a7 7 0 0 0 6 6.9V21h1.4v-3.1a7 7 0 0 0 3.2-1.2l3.8 3.8 1.3-1.3L4.3 3Zm10.6 8V6a3 3 0 0 0-6 0v.5l6 6V11Z"/></svg>';
+function renderGroupCall(info) {
+  const ov = $('call'), grid = $('call-grid');
+  if (info.state === 'idle') {
+    ov.classList.remove('group', 'ringing'); grid.classList.add('hidden'); grid.innerHTML = '';
+    if (calls.state !== 'idle') return renderCall(calls.info());
+    renderGcallBanner();
+    return renderCall({ state: 'idle' });
+  }
+  ov.classList.remove('hidden'); ov.classList.add('group');
+  lastCallInfo = info;
+  if (lastCallState === 'idle' || lastCallState === '') { if (callMini) setCallMini(false); ov.style.setProperty('--call-bg', 'none'); }
+  if (callMini) ov.classList.toggle('voice', !info.video);
+  setAvatar($('call-avatar'), info.gid);
+  $('call-name').textContent = app.nameOf(info.gid); $('mini-name').textContent = app.nameOf(info.gid);
+  const incoming = info.state === 'incoming';
+  ov.classList.toggle('ringing', incoming || info.state === 'outgoing');
+  $('call-min-btn').classList.toggle('hidden', incoming);
+  $('incoming-controls').classList.toggle('hidden', !incoming);
+  $('call-controls').classList.toggle('hidden', incoming);
+  $('local-video').classList.add('hidden');
+  $('cam-btn').classList.toggle('hidden', !info.video); $('flip-btn').classList.toggle('hidden', !info.video);
+  for (const id of ['share-btn', 'call-game-btn', 'call-watch-btn', 'call-share-btn']) $(id).classList.add('hidden');
+  $('speaker-btn').classList.toggle('hidden', !nativeAudio || info.state !== 'active');
+  $('mute-btn').classList.toggle('on', info.muted); $('cam-btn').classList.toggle('on', info.camOff);
+  ov.classList.remove('sharing');
+  ov.classList.toggle('has-video', !!((info.video && !info.camOff) || info.peers.some((p) => p.video)));
+  grid.classList.toggle('hidden', incoming);
+  if (!incoming) renderGrid(info);
+  const status = $('call-status');
+  clearInterval(callTimer);
+  if (incoming) {
+    status.textContent = `${app.nameOf(info.ringer)} is calling the group…`;
+    if (lastCallState !== 'incoming') {
+      if (settings.get().sounds) tones.startRing(true);
+      haptic([400, 200, 400]);
+      clearInterval(ringVib); ringVib = setInterval(() => haptic([400, 200, 400]), 2500);
+      callNotification(Object.assign({}, info, { peer: info.gid }));
+    }
+  } else { clearInterval(ringVib); ringVib = null; closeCallNotification(); }
+  const n = info.peers.filter((p) => p.connected).length + 1;
+  if (info.state === 'outgoing') status.textContent = $('mini-time').textContent = 'Calling the group…';
+  else if (info.state === 'connecting') { tones.stop(); status.textContent = $('mini-time').textContent = 'Joining…'; }
+  else if (info.state === 'active') {
+    tones.stop();
+    if (lastCallState !== 'active') setSpeaker(true);
+    const upd = () => { const sec = Math.floor((Date.now() - info.startedAt) / 1000); const clock = `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`; status.textContent = `${clock} · ${n} in call`; $('mini-time').textContent = clock; };
+    upd(); callTimer = setInterval(upd, 1000);
+  }
+  lastCallState = info.state;
+}
+function renderGrid(info) {
+  const grid = $('call-grid');
+  const tiles = [{ pk: app.pk, stream: info.local, video: info.video && !info.camOff, muted: info.muted, me: true, connected: true, speaking: false }].concat(info.peers);
+  grid.dataset.n = String(tiles.length);
+  const keep = new Set(tiles.map((t) => t.pk));
+  grid.querySelectorAll('.ctile').forEach((el) => { if (!keep.has(el.dataset.pk)) { el.classList.add('leave'); el.remove(); } });
+  for (const t of tiles) {
+    let el = grid.querySelector(`.ctile[data-pk="${t.pk}"]`);
+    if (!el) {
+      el = document.createElement('div'); el.className = 'ctile enter' + (t.me ? ' me' : ''); el.dataset.pk = t.pk;
+      el.innerHTML = `<video autoplay playsinline ${t.me ? 'muted' : ''} class="hidden"></video>${avatarHtml(t.pk)}<div class="ctag"><b></b></div>`;
+      grid.appendChild(el);
+    }
+    const v = el.querySelector('video');
+    if (t.stream && v.srcObject !== t.stream) { v.srcObject = t.stream; v.play().catch(() => {}); }
+    v.classList.toggle('hidden', !(t.video && t.stream));
+    el.classList.toggle('vid', !!(t.video && t.stream));
+    el.classList.toggle('waiting', !t.connected && !t.me);
+    el.classList.toggle('speaking', !!t.speaking);
+    el.querySelector('.ctag').innerHTML = `${t.muted ? MUTED_SVG : ''}<b>${t.me ? 'You' : esc(app.nameOf(t.pk))}</b>`;
+  }
+}
+function renderGcallBanner() {
+  let b = document.getElementById('gcall-banner');
+  const id = app && app.openChat, o = id && isGroupId(id) && gcalls && gcalls.ongoing[id];
+  const on = o && gcalls.state === 'idle' && calls.state === 'idle' && Date.now() - o.ts < 2 * 3600e3 && !$('chat').classList.contains('hidden');
+  if (!on) { if (b) b.remove(); return; }
+  if (!b) { b = document.createElement('div'); b.id = 'gcall-banner'; b.className = 'gcall-banner'; $('chat-name').closest('header').insertAdjacentElement('afterend', b); }
+  b.innerHTML = `<span class="pulse"></span><b>${esc(app.nameOf(o.by))} started a ${o.video ? 'video' : 'voice'} call</b><button class="btn" id="gcall-join">Join</button>`;
+  $('gcall-join').onclick = () => { tones.ensure(); gcalls.join(id).catch((e) => toast(e.message, 'error')); };
+}
+function wireGroupCalls() {
+  gcalls.addEventListener('state', (e) => renderCall(e.detail));
+  gcalls.addEventListener('local', () => { if (gcalls.state !== 'idle' && gcalls.state !== 'incoming') renderGrid(gcalls.info()); });
+  gcalls.addEventListener('peer', () => renderGrid(gcalls.info()));
+  gcalls.addEventListener('speaking', () => { document.querySelectorAll('#call-grid .ctile').forEach((t) => { const p = gcalls.peers.get(t.dataset.pk); t.classList.toggle('speaking', !!(p && p.speaking)); }); });
+  gcalls.addEventListener('ringing', () => { if (settings.get().sounds) tones.startRing(false); });
+  gcalls.addEventListener('outgoing', (e) => nudge(app.members(e.detail.gid), 'call'));
+  gcalls.addEventListener('error', (e) => toast(e.detail, 'error'));
+  gcalls.addEventListener('left', (e) => { if (e.detail.remote) toast(`${app.nameOf(e.detail.pk)} left the call`); });
+  gcalls.addEventListener('ongoing', () => renderGcallBanner());
+  gcalls.addEventListener('ended', (e) => {
+    const msg = { 'no-answer': 'No one answered', failed: 'Could not connect', ended: 'Call ended', error: 'Call could not start', missed: 'Missed group call', declined: 'Declined' }[e.detail] || 'Call ended';
+    toast(msg); renderGcallBanner();
+  });
 }
 
 /* ---------------- boot ---------------- */

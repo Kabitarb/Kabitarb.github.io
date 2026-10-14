@@ -4,6 +4,10 @@
 import { GAMES, ENGINES } from './registry.js';
 import { randSeed } from './util.js';
 
+export const REACTIONS = ['😂', '😮', '🔥', '👏', '😤', '🤝', '⏰'];
+const TURN_SEC = 60;
+const clone = (x) => JSON.parse(JSON.stringify(x));
+
 export class GameManager extends EventTarget {
   constructor(app) {
     super();
@@ -17,6 +21,25 @@ export class GameManager extends EventTarget {
   myIndex(s) { return s.players.indexOf(this.app.pk); }
   engine(s) { return ENGINES[s.type]; }
   isOver(s) { return s.status === 'playing' && !!s.state && this.engine(s).over(s.state); }
+  turnDeadline(s) { const G = GAMES[s.type]; if (!G || G.simul || s.status !== 'playing' || !s.state || this.isOver(s)) return 0; return s.ts + (G.turnSec || TURN_SEC) * 1000; }
+  react(id, e) { const s = this.get(id); if (!s || s.status === 'done' || !REACTIONS.includes(e)) return; this.send(s, { a: 'react', e }); this.emit('react', { id, from: this.app.pk, e }); }
+  canUndo(s) { return !!(s && s.status === 'playing' && s.prev && s.prevSeq === s.seq && s.prevBy === this.app.pk && !this.isOver(s) && !GAMES[s.type].simul); }
+  requestUndo(id) { const s = this.get(id); if (!this.canUndo(s)) return false; this.send(s, { a: 'undo', seq: s.seq, state: s.prev }); return true; }
+  answerUndo(id, ok) {
+    const s = this.get(id); const u = s && s.undoReq; if (!u) return; delete s.undoReq;
+    if (ok && u.seq === s.seq && s.status === 'playing') { s.state = u.state; s.seq++; s.ts = Date.now(); delete s.prev; delete s.hint; this.app.store.save(); this.send(s, { a: 'move', seq: s.seq, mv: null, state: s.state, undo: true }); }
+    else this.send(s, { a: 'undo-no' });
+    this.emit('update', { id });
+  }
+  hint(id) { const s = this.get(id); if (!s || !this.isMyTurn(s)) return null; const E = this.engine(s); s.hint = (E.hint && E.hint(s.state, this.myIndex(s))) || null; this.emit('update', { id }); return s.hint; }
+  stats(chatId) { return (this.app.state.gameStats || {})[chatId] || {}; }
+  recordStat(s, w) {
+    const cs = ((this.app.state.gameStats ||= {})[s.chatId] ||= {});
+    s.players.forEach((p, i) => {
+      const r = (cs[p] ||= { w: 0, l: 0, d: 0, streak: 0, best: 0, by: {} }); const g = (r.by[s.type] ||= { w: 0, l: 0, d: 0 });
+      if (w === null || w === undefined || w < 0) { r.d++; g.d++; r.streak = 0; } else if (w === i) { r.w++; g.w++; r.streak++; r.best = Math.max(r.best, r.streak); } else { r.l++; g.l++; r.streak = 0; }
+    });
+  }
   isMyTurn(s) {
     if (s.status !== 'playing' || !s.state || this.isOver(s)) return false;
     const E = this.engine(s), my = this.myIndex(s);
@@ -81,13 +104,15 @@ export class GameManager extends EventTarget {
     const s = this.get(id); if (!s || s.status !== 'playing') return false;
     const pi = this.myIndex(s); if (pi < 0) return false;
     const E = this.engine(s);
+    const prev = clone(s.state);
     let ok;
     if (mv && mv.a === 'again') {
       if (!E.over(s.state) || !E.again || this.seriesWinner(s) >= 0) return false;
       E.again(s.state, pi); ok = true;
     } else ok = E.apply(s.state, pi, mv);
     if (!ok) return false;
-    s.seq++; s.ts = Date.now();
+    s.seq++; s.ts = Date.now(); delete s.hint; delete s.undoReq;
+    if (mv && mv.a === 'again') delete s.prev; else { s.prev = prev; s.prevSeq = s.seq; s.prevBy = this.app.pk; }
     this.afterMove(s);
     this.app.store.save();
     this.send(s, { a: 'move', seq: s.seq, mv, state: s.state });
@@ -103,6 +128,7 @@ export class GameManager extends EventTarget {
     s.cardFor = key;
     const w = st.winner;
     const G = GAMES[s.type];
+    this.recordStat(s, w);
     const roundTxt = st.round && st.round > 1 ? ` (round ${st.round})` : '';
     if (w !== null && w !== undefined && w >= 0) this.card(s, `${w === this.myIndex(s) ? 'You' : this.app.nameOf(s.players[w])} won ${G.name}${roundTxt} 🏆`);
     else this.card(s, `${G.name}${roundTxt} ended in a draw`);
@@ -156,9 +182,20 @@ export class GameManager extends EventTarget {
           }
           return;
         }
-        s.state = c.state; s.seq = Number(c.seq); s.ts = Date.now();
+        const mine = s.state;
+        s.state = c.state; s.seq = Number(c.seq); s.ts = Date.now(); delete s.hint; delete s.undoReq; if (from !== me) delete s.prev;
+        if (from !== me && mine && this.engine(s).merge && this.engine(s).merge(s.state, mine)) { s.seq++; this.send(s, { a: 'move', seq: s.seq, mv: null, state: s.state }); }
         this.afterMove(s);
         break;
+      case 'react':
+        if (!s || s.chatId !== chatId || !s.players.includes(from) || !REACTIONS.includes(c.e)) return;
+        this.emit('react', { id, from, e: c.e }); return;
+      case 'undo':
+        if (!s || s.chatId !== chatId || s.status !== 'playing' || !s.players.includes(from) || from === me || !c.state) return;
+        s.undoReq = { from, seq: Number(c.seq), state: c.state }; break;
+      case 'undo-no':
+        if (!s || from === me) return;
+        this.emit('undo-no', { id, from }); return;
       case 'quit':
         if (!s || s.chatId !== chatId || !s.players.includes(from) || s.status === 'done') return;
         s.status = 'done'; s.quitBy = from; s.ts = Date.now();

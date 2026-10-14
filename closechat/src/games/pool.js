@@ -24,6 +24,7 @@ export function simulate(balls, shot, onStep) {
   const cue = b.find((x) => x.n === 0); if (!cue) return { potted: [], first: null };
   const v = 2 + 26 * Math.min(1, Math.max(0, shot.pow));
   cue.vx = Math.cos(shot.ang) * v; cue.vy = Math.sin(shot.ang) * v;
+  const spin = shot.spin && isFinite(shot.spin.x) && isFinite(shot.spin.y) ? { x: Math.max(-1, Math.min(1, shot.spin.x)), y: Math.max(-1, Math.min(1, shot.spin.y)) } : null; let spun = !spin;
   for (const x of b) { x.vx = x.vx || 0; x.vy = x.vy || 0; }
   const potted = []; let first = null, steps = 0;
   const live = () => b.filter((x) => x.on);
@@ -54,6 +55,11 @@ export function simulate(balls, shot, onStep) {
       const p = (a.vx - c.vx) * nx + (a.vy - c.vy) * ny; if (p <= 0) continue;
       a.vx -= p * nx; a.vy -= p * ny; c.vx += p * nx; c.vy += p * ny;
       if (first === null && (a.n === 0 || c.n === 0)) first = a.n === 0 ? c.n : a.n;
+      if (!spun && (a.n === 0 || c.n === 0)) {
+        // English: top/back spin pushes the cue ball along/against its travel after impact, side spin nudges it sideways.
+        spun = true; const k = (3 + 7 * shot.pow); const ux = Math.cos(shot.ang), uy = Math.sin(shot.ang);
+        cue.vx += ux * k * spin.y - uy * k * 0.5 * spin.x; cue.vy += uy * k * spin.y + ux * k * 0.5 * spin.x;
+      }
       moving = true;
     }
     if (onStep && onStep(b, steps) === false) break;
@@ -77,7 +83,8 @@ export const engine = {
   apply(st, pi, mv) {
     if (engine.over(st) || st.turn !== pi) return false;
     const ang = Number(mv.ang), pow = Number(mv.pow); if (!isFinite(ang) || !(pow > 0 && pow <= 1)) return false;
-    const { potted, first } = simulate(st.balls, { ang, pow });
+    const spin = mv.spin && isFinite(Number(mv.spin.x)) && isFinite(Number(mv.spin.y)) ? { x: Math.round(Math.max(-1, Math.min(1, Number(mv.spin.x))) * 100) / 100, y: Math.round(Math.max(-1, Math.min(1, Number(mv.spin.y))) * 100) / 100 } : null;
+    const { potted, first } = simulate(st.balls, { ang, pow, spin });
     st.n++;
     const mine = st.groups[pi], left = (g) => st.balls.filter((b) => b.on && typeOf(b.n) === g).length;
     let foul = false, again = false, msg = '';
@@ -99,7 +106,7 @@ export const engine = {
       if (scratch) placeCue(st.balls);
       if (!again || foul) st.turn = 1 - pi;
     }
-    st.last = { pi, ang, pow, potted, first, foul, n: st.n };
+    st.last = { pi, ang, pow, spin, potted, first, foul, n: st.n };
     st.msg = msg;
     return true;
   },
@@ -108,7 +115,7 @@ export const engine = {
 };
 
 export function view(ctx) {
-  let el, cv, g, raf = 0, snapshot = null, seen = -1, aim = null, s0 = null, playing = false, rot = false;
+  let el, cv, g, raf = 0, snapshot = null, seen = -1, aim = null, s0 = null, playing = false, rot = false, spin = { x: 0, y: 0 };
   const copy = (b) => b.map((x) => ({ ...x }));
   function draw(balls, aimInfo) {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -124,7 +131,21 @@ export function view(ctx) {
     const cue = balls.find((b) => b.n === 0 && b.on);
     if (aimInfo && cue) {
       const { ang, pow } = aimInfo;
-      g.strokeStyle = 'rgba(255,255,255,.55)'; g.setLineDash([6, 6]); g.lineWidth = 2; g.beginPath(); g.moveTo(cue.x, cue.y); g.lineTo(cue.x + Math.cos(ang) * 260, cue.y + Math.sin(ang) * 260); g.stroke(); g.setLineDash([]);
+      // Shot preview: ghost cue ball at first contact, object-ball direction and cue-ball deflection.
+      const ux = Math.cos(ang), uy = Math.sin(ang); let hit = null, gx = cue.x, gy = cue.y;
+      for (let t = 0; t < 900; t += 2) {
+        gx = cue.x + ux * t; gy = cue.y + uy * t;
+        if (gx < PAD + R || gx > W - PAD - R || gy < PAD + R || gy > H - PAD - R) break;
+        hit = balls.find((b) => b.on && b.n !== 0 && (b.x - gx) ** 2 + (b.y - gy) ** 2 <= 4 * R * R); if (hit) break;
+      }
+      g.strokeStyle = 'rgba(255,255,255,.6)'; g.setLineDash([6, 6]); g.lineWidth = 2; g.beginPath(); g.moveTo(cue.x, cue.y); g.lineTo(gx, gy); g.stroke(); g.setLineDash([]);
+      g.strokeStyle = 'rgba(255,255,255,.7)'; g.lineWidth = 1.5; g.beginPath(); g.arc(gx, gy, R, 0, 7); g.stroke();
+      if (hit) {
+        const nx = (hit.x - gx) / (2 * R), ny = (hit.y - gy) / (2 * R), dot = ux * nx + uy * ny;
+        g.strokeStyle = 'rgba(255,255,120,.85)'; g.lineWidth = 2; g.beginPath(); g.moveTo(hit.x, hit.y); g.lineTo(hit.x + nx * 90 * Math.max(0.2, dot), hit.y + ny * 90 * Math.max(0.2, dot)); g.stroke();
+        const tx = ux - dot * nx, ty = uy - dot * ny, tl = Math.hypot(tx, ty) || 1;
+        g.strokeStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.moveTo(gx, gy); g.lineTo(gx + tx / tl * 50, gy + ty / tl * 50); g.stroke();
+      }
       // cue stick pulled back by power
       const back = 20 + pow * 70; const sx = cue.x - Math.cos(ang) * back, sy = cue.y - Math.sin(ang) * back;
       g.strokeStyle = '#d9a066'; g.lineWidth = 6; g.lineCap = 'round'; g.beginPath(); g.moveTo(sx, sy); g.lineTo(sx - Math.cos(ang) * 230, sy - Math.sin(ang) * 230); g.stroke();
@@ -155,11 +176,15 @@ export function view(ctx) {
       const gname = (i) => (st.groups[i] ? st.groups[i] + 's' : 'open');
       const remaining = (i) => st.balls.filter((b) => b.on && b.n && b.n !== 8 && typeOf(b.n) === st.groups[i]).map((b) => b.n);
       if (!cv || !el.contains(cv)) {
-        el.innerHTML = `${scoreStrip(ctx, s, over)}<div class="pool-info" id="pool-info"></div><div class="pool-wrap"><canvas class="pool" id="pool-cv"></canvas></div><div class="game-status" id="pool-status"></div>`;
+        el.innerHTML = `${scoreStrip(ctx, s, over)}<div class="pool-info" id="pool-info"></div><div class="pool-wrap"><canvas class="pool" id="pool-cv"></canvas></div><div class="pool-tools"><div class="pool-spin" id="pool-spin" title="Spin: tap where to hit the cue ball" aria-label="Spin"><i></i></div><span class="tiny muted" id="pool-spin-lbl">Spin: centre</span></div><div class="game-status" id="pool-status"></div>`;
+        const sp = el.querySelector('#pool-spin'), spDot = sp.querySelector('i'), spLbl = el.querySelector('#pool-spin-lbl');
+        const setSpin = (e) => { const r = sp.getBoundingClientRect(); let x = ((e.clientX - r.left) / r.width - 0.5) * 2, y = -((e.clientY - r.top) / r.height - 0.5) * 2; const m = Math.hypot(x, y); if (m > 0.85) { x = x / m * 0.85; y = y / m * 0.85; } if (m < 0.15) { x = 0; y = 0; } spin = { x: Math.round(x * 100) / 100, y: Math.round(y * 100) / 100 }; spDot.style.left = `${50 + spin.x * 50}%`; spDot.style.top = `${50 - spin.y * 50}%`; spLbl.textContent = `Spin: ${!spin.x && !spin.y ? 'centre' : (spin.y > 0.2 ? 'top ' : spin.y < -0.2 ? 'back ' : '') + (spin.x > 0.2 ? 'right' : spin.x < -0.2 ? 'left' : '')}`.trim(); ctx.haptic(5); };
+        sp.onpointerdown = (e) => { sp.setPointerCapture(e.pointerId); setSpin(e); sp.onpointermove = setSpin; };
+        sp.onpointerup = sp.onpointercancel = () => { sp.onpointermove = null; };
         cv = el.querySelector('#pool-cv'); g = cv.getContext('2d');
         cv.onpointerdown = (e) => { if (!s0 || playing || !(s0.players[s0.state.turn] === ctx.pk) || engine.over(s0.state)) return; cv.setPointerCapture(e.pointerId); aim = { start: pos(e), ang: 0, pow: 0 }; e.preventDefault(); };
         cv.onpointermove = (e) => { if (!aim) return; const [x, y] = pos(e); const cue = s0.state.balls.find((b) => b.n === 0); const dx = x - cue.x, dy = y - cue.y; aim.ang = Math.atan2(dy, dx); aim.pow = Math.min(1, Math.max(0.1, Math.hypot(dx, dy) / 260)); draw(s0.state.balls, aim); };
-        cv.onpointerup = () => { if (!aim) return; const shot = { ang: Math.round(aim.ang * 1000) / 1000, pow: Math.round(aim.pow * 100) / 100 }; aim = null; ctx.haptic(20); ctx.fx(900, 0.05, 0, 0.08, 'square'); ctx.move(shot); };
+        cv.onpointerup = () => { if (!aim) return; const shot = { ang: Math.round(aim.ang * 1000) / 1000, pow: Math.round(aim.pow * 100) / 100, spin: spin.x || spin.y ? { ...spin } : undefined }; aim = null; ctx.haptic(20); ctx.fx(900, 0.05, 0, 0.08, 'square'); ctx.move(shot); };
         cv.onpointercancel = () => { aim = null; draw(s0.state.balls); };
       } else { el.querySelector('.g-score').outerHTML = scoreStrip(ctx, s, over); }
       s0 = s;

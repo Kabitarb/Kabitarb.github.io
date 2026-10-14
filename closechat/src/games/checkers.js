@@ -54,6 +54,12 @@ export const engine = {
   },
   again(st) { Object.assign(st, { b: start(), turn: st.round % 2, winner: null, draw: false, chain: null, last: null, round: st.round + 1, n: 0, quiet: 0 }); },
   over(st) { return st.winner !== null || st.draw; },
+  hint(st, pi) {
+    const legal = legalMoves(st, pi); if (!legal.length) return null;
+    const threatened = (to, from) => { const r = to >> 3, c = to & 7; return [[-1, -1], [-1, 1], [1, -1], [1, 1]].some(([dr, dc]) => { const ar = r + dr, ac = c + dc, br = r - dr, bc = c - dc; if (ar < 0 || ar > 7 || ac < 0 || ac > 7 || br < 0 || br > 7 || bc < 0 || bc > 7) return false; const a = st.b[ar * 8 + ac], bi = br * 8 + bc; const landingFree = st.b[bi] === -1 || bi === from; if (a < 0 || owner(a) !== 1 - pi || !landingFree) return false; return king(a) || (pi === 0 ? dr < 0 : dr > 0); }); };
+    const score = (m) => (m.cap !== undefined ? 100 : 0) + (!king(st.b[m.from]) && ((pi === 0 && m.to < 8) || (pi === 1 && m.to >= 56)) ? 50 : 0) + (threatened(m.to, m.from) ? -30 : 0) + (threatened(m.from, -1) ? 10 : 0);
+    return legal.slice().sort((a, b) => score(b) - score(a)).map((m) => ({ from: m.from, to: m.to }))[0];
+  },
 };
 
 export function view(ctx) {
@@ -73,7 +79,7 @@ export function view(ctx) {
       for (let k = 0; k < 64; k++) {
         const i = flip ? 63 - k : k; const v = st.b[i];
         const isLast = fresh && st.last.path.includes(i);
-        cells += `<div class="ck-cell ${dark(i) ? 'd' : 'l'} ${tgts.has(i) ? 'tgt' : ''} ${isLast ? 'last' : ''}" data-i="${i}">${v >= 0 ? `<div class="ck-piece p${owner(v)} ${king(v) ? 'king' : ''} ${froms.has(i) ? 'can' : ''} ${sel === i ? 'sel' : ''}" data-i="${i}"></div>` : ''}</div>`;
+        cells += `<div class="ck-cell ${dark(i) ? 'd' : 'l'} ${tgts.has(i) ? 'tgt' : ''} ${isLast ? 'last' : ''} ${mine && s.hint && (s.hint.from === i || s.hint.to === i) ? 'hint' : ''}" data-i="${i}">${v >= 0 ? `<div class="ck-piece p${owner(v)} ${king(v) ? 'king' : ''} ${froms.has(i) ? 'can' : ''} ${sel === i ? 'sel' : ''}" data-i="${i}"></div>` : ''}</div>`;
       }
       const status = over ? (st.draw ? "It's a draw" : st.winner === ctx.my ? 'You win!' : `${esc(ctx.nameOf(s.players[st.winner]))} wins`)
         : mine ? (st.chain !== null && st.chain !== undefined ? 'Keep jumping!' : legal[0] && legal[0].cap !== undefined ? 'Your turn — you must capture' : sel !== null ? 'Pick a square' : 'Your turn') : `${esc(ctx.nameOf(s.players[st.turn]))}'s turn`;
