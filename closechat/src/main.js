@@ -2387,7 +2387,7 @@ function openLocalSetup(type) {
   let saved = {}; try { saved = JSON.parse(localStorage.getItem(LOCAL_SETUP_KEY) || '{}'); } catch {}
   let n = Math.min(G.max, Math.max(G.min, saved.n || 2));
   const names = Array.from({ length: 4 }, (_, i) => (saved.names && saved.names[i]) || `Player ${i + 1}`);
-  const pieces = Array.from({ length: 4 }, (_, i) => (saved.pieces && PIECES[saved.pieces[i]] ? saved.pieces[i] : ['coin', 'pawn', 'star', 'gem'][i]));
+  const pieces = Array.from({ length: 4 }, (_, i) => (saved.pieces && PIECES[saved.pieces[i]] ? saved.pieces[i] : ['pin', 'pin', 'pin', 'pin'][i]));
   const hasPieces = type === 'ludo' || type === 'snakes';
   const draw = () => {
     showModal(`<div class="lp"><div class="lobby-hero" style="--gc:${G.color}"><span>${G.icon}</span></div><h3>${esc(G.name)}</h3><p class="muted">Pass &amp; play — everyone on this phone</p>
